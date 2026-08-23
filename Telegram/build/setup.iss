@@ -34,7 +34,9 @@ CloseApplications=force
 DisableDirPage=no
 DisableProgramGroupPage=no
 WizardStyle=modern
+#ifndef NoSign
 SignTool=sha256
+#endif
 
 #if MyBuildTarget == "winarm"
   ArchitecturesAllowed="arm64"
@@ -72,6 +74,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "{#ReleasePath}\Telegram.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ReleasePath}\Updater.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#ReleasePath}\xray.exe"; DestDir: "{app}"; Flags: ignoreversion
 #if MyBuildTarget != "winarm"
 Source: "{#ReleasePath}\{#ModulesFolder}\d3d\d3dcompiler_47.dll"; DestDir: "{app}\{#ModulesFolder}\d3d"; Flags: ignoreversion
 #endif
@@ -88,6 +91,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 [UninstallDelete]
 Type: files; Name: "{app}\data"
 Type: files; Name: "{app}\data_config"
+Type: files; Name: "{app}\xray.exe"
 Type: files; Name: "{app}\log.txt"
 Type: filesandordirs; Name: "{app}\DebugLogs"
 Type: filesandordirs; Name: "{app}\tupdates"
@@ -98,6 +102,7 @@ Type: filesandordirs; Name: "{app}\modules"
 Type: dirifempty; Name: "{app}"
 Type: files; Name: "{userappdata}\{#MyAppName}\data"
 Type: files; Name: "{userappdata}\{#MyAppName}\data_config"
+Type: files; Name: "{userappdata}\{#MyAppName}\xray.exe"
 Type: files; Name: "{userappdata}\{#MyAppName}\log.txt"
 Type: filesandordirs; Name: "{userappdata}\{#MyAppName}\DebugLogs"
 Type: filesandordirs; Name: "{userappdata}\{#MyAppName}\tupdates"

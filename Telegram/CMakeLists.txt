@@ -590,6 +590,8 @@ PRIVATE
     core/ui_integration.h
     core/update_checker.cpp
     core/update_checker.h
+    core/xray_proxy_manager.cpp
+    core/xray_proxy_manager.h
     core/utils.cpp
     core/utils.h
     core/version.h

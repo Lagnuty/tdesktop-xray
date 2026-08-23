@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/update_checker.h"
 #include "core/shortcuts.h"
 #include "core/sandbox.h"
+#include "core/xray_proxy_manager.h"
 #include "core/local_url_handlers.h"
 #include "core/launcher.h"
 #include "core/proxy_rotation_manager.h"
@@ -280,6 +281,7 @@ Application::~Application() {
 
 	_private->proxyRotation = nullptr;
 	_domain->finish();
+	XrayProxy::Stop();
 	MTP::WebProxy::Transport::Shutdown();
 
 	Local::finish();
@@ -936,6 +938,7 @@ void Application::badMtprotoConfigurationError() {
 void Application::startLocalStorage() {
 	Ui::GL::DetectLastCheckCrash();
 	Local::start();
+	XrayProxy::SyncFromSettings();
 	_saveSettingsTimer.emplace([=] { saveSettings(); });
 	settings().saveDelayedRequests() | rpl::on_next([=] {
 		saveSettingsDelayed();

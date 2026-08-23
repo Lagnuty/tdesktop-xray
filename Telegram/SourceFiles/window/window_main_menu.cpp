@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_instance.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
+#include "core/xray_proxy_manager.h"
 #include "data/data_changes.h"
 #include "data/data_document_media.h"
 #include "data/data_folder.h"
@@ -369,8 +370,16 @@ MainMenu::MainMenu(
 
 	_footer->heightValue(
 	) | rpl::on_next([=] {
-		_telegram->moveToLeft(st::mainMenuFooterLeft, _footer->height() - st::mainMenuTelegramBottom - _telegram->height());
-		_version->moveToLeft(st::mainMenuFooterLeft, _footer->height() - st::mainMenuVersionBottom - _version->height());
+		_telegram->moveToLeft(
+			st::mainMenuFooterLeft,
+			_footer->height()
+				- st::mainMenuTelegramBottom
+				- _telegram->height());
+		_version->moveToLeft(
+			st::mainMenuFooterLeft,
+			_footer->height()
+				- st::mainMenuVersionBottom
+				- _version->height());
 	}, _footer->lifetime());
 
 	rpl::combine(
@@ -396,7 +405,9 @@ MainMenu::MainMenu(
 		.append(QChar(' '))
 		.append(QChar(8211))
 		.append(QChar(' '))
-		.append(tr::link(tr::lng_menu_about(tr::now), 2))); // Link 2.
+		.append(tr::link(tr::lng_menu_about(tr::now), 2)) // Link 2.
+		.append('\n')
+		.append(Core::XrayProxy::VersionText()));
 	_version->setLink(
 		1,
 		std::make_shared<UrlClickHandler>(Core::App().changelogLink()));

@@ -9,9 +9,23 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mtproto/mtproto_proxy_data.h"
 
+#include <QtCore/QString>
+
 #include <array>
 
 namespace Core {
+
+enum class XrayProxyMode {
+	Proxy,
+	Vpn,
+};
+
+struct XrayProxyFragmentSettings {
+	bool enabled = true;
+	QString packets;
+	QString length;
+	QString interval;
+};
 
 class SettingsProxy final {
 public:
@@ -42,6 +56,18 @@ public:
 
 	[[nodiscard]] bool proxyRotationEnabled() const;
 	void setProxyRotationEnabled(bool value);
+
+	[[nodiscard]] bool xrayProxyEnabled() const;
+	void setXrayProxyEnabled(bool value);
+
+	[[nodiscard]] QString xrayProxyLink() const;
+	void setXrayProxyLink(QString value);
+
+	[[nodiscard]] XrayProxyMode xrayProxyMode() const;
+	void setXrayProxyMode(XrayProxyMode value);
+
+	[[nodiscard]] XrayProxyFragmentSettings xrayProxyFragment() const;
+	void setXrayProxyFragment(XrayProxyFragmentSettings value);
 
 	[[nodiscard]] int proxyRotationTimeout() const;
 	void setProxyRotationTimeout(int value);
@@ -77,8 +103,12 @@ private:
 	bool _tryIPv6 = false;
 	bool _useProxyForCalls = false;
 	bool _proxyRotationEnabled = false;
+	bool _xrayProxyEnabled = false;
 	bool _checkIpWarningShown = false;
 	int _proxyRotationTimeout = kDefaultProxyRotationTimeout;
+	XrayProxyMode _xrayProxyMode = XrayProxyMode::Proxy;
+	XrayProxyFragmentSettings _xrayProxyFragment;
+	QString _xrayProxyLink;
 	MTP::ProxyData::Settings _settings = MTP::ProxyData::Settings::System;
 	MTP::ProxyData _selected;
 	std::vector<MTP::ProxyData> _list;

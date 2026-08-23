@@ -127,6 +127,7 @@ set "ReleasePath=%SolutionPath%\Release"
 set "DeployPath=%ReleasePath%\deploy\%AppVersionStrMajor%\%AppVersionStrFull%"
 set "SignPath=%HomePath%\..\..\DesktopPrivate\Sign.bat"
 set "BinaryName=Telegram"
+set "XrayBinaryName=xray.exe"
 set "DropboxSymbolsPath=Y:\Telegram\symbols"
 set "DropboxSymbolsPathFallback=%HomePath%\..\..\Dropbox\Telegram\symbols"
 set "FinalReleasePath=Z:\Projects\backup\tdesktop"
@@ -212,6 +213,12 @@ call :sign "%BinaryName%.exe"
 
 if %BuildUWP% equ 0 (
   call :sign "Updater.exe"
+  if not exist "%XrayBinaryName%" (
+    echo Xray binary "%ReleasePath%\%XrayBinaryName%" not found!
+    echo Place xray.exe into out\Release before running the release packer.
+    exit /b 1
+  )
+  call :sign "%XrayBinaryName%"
 
   if %AlphaVersion% equ 0 (
     iscc /dMyAppVersion=%AppVersionStrSmall% /dMyAppVersionZero=%AppVersionStr% /dMyAppVersionFull=%AppVersionStrFull% "/dReleasePath=%ReleasePath%" "/dMyBuildTarget=%BuildTarget%" "%FullScriptPath%setup.iss" || goto error
@@ -219,9 +226,9 @@ if %BuildUWP% equ 0 (
   )
 
   if %BuildARM% neq 0 (
-    call Packer.exe -version %VersionForPacker% -path %BinaryName%.exe -path Updater.exe -target %BuildTarget% %AlphaBetaParam% || goto error
+    call Packer.exe -version %VersionForPacker% -path %BinaryName%.exe -path Updater.exe -path %XrayBinaryName% -target %BuildTarget% %AlphaBetaParam% || goto error
   ) else (
-    call Packer.exe -version %VersionForPacker% -path %BinaryName%.exe -path Updater.exe -path "modules\%Platform%\d3d\d3dcompiler_47.dll" -target %BuildTarget% %AlphaBetaParam% || goto error
+    call Packer.exe -version %VersionForPacker% -path %BinaryName%.exe -path Updater.exe -path %XrayBinaryName% -path "modules\%Platform%\d3d\d3dcompiler_47.dll" -target %BuildTarget% %AlphaBetaParam% || goto error
   )
 
   if %AlphaVersion% neq 0 (
@@ -298,6 +305,7 @@ if %BuildUWP% neq 0 (
   )
 
   move "%ReleasePath%\%BinaryName%.exe" "%DeployPath%\%BinaryName%\" || goto error
+  move "%ReleasePath%\%XrayBinaryName%" "%DeployPath%\%BinaryName%\" || goto error
   if %BuildARM% equ 0 (
     xcopy "%ReleasePath%\modules\%Platform%\d3d\d3dcompiler_47.dll" "%DeployPath%\%BinaryName%\modules\%Platform%\d3d\" || goto error
   )
@@ -311,10 +319,12 @@ if %BuildUWP% neq 0 (
   )
   move "%ReleasePath%\%UpdateFile%" "%DeployPath%\" || goto error
 
+  if not exist "%DeployPath%\%BinaryName%\TelegramForcePortable" mkdir "%DeployPath%\%BinaryName%\TelegramForcePortable" || goto error
   cd "%DeployPath%"
   call :packportable
 
   move "%DeployPath%\%BinaryName%\%BinaryName%.exe" "%DeployPath%\" || goto error
+  move "%DeployPath%\%BinaryName%\%XrayBinaryName%" "%DeployPath%\" || goto error
   rmdir "%DeployPath%\%BinaryName%"
 )
 

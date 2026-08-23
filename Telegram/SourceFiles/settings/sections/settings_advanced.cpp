@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "core/launcher.h"
 #include "core/update_checker.h"
+#include "core/xray_proxy_manager.h"
 #include "data/data_auto_download.h"
 #include "data/data_session.h"
 #include "export/export_manager.h"
@@ -61,6 +62,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
@@ -94,6 +96,134 @@ using namespace Builder;
 	return result;
 }
 #endif // Q_OS_MAC && !OS_MAC_STORE
+
+[[nodiscard]] QString VersionInfoText() {
+	return tr::lng_settings_current_version(
+		tr::now,
+		lt_version,
+		currentVersionText()
+	) + '\n' + Core::XrayProxy::VersionText();
+}
+
+void ShowXrayProxyBox(not_null<Window::SessionController*> controller) {
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		auto &proxy = Core::App().settings().proxy();
+		box->setTitle(tr::lng_xray_proxy_title());
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			tr::lng_xray_proxy_about(),
+			st::settingsAddReplyLabel));
+		const auto field = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::settingsAddReplyField,
+			tr::lng_xray_proxy_link_placeholder(),
+			proxy.xrayProxyLink()));
+		const auto modeGroup = std::make_shared<Ui::RadioenumGroup<
+			Core::XrayProxyMode>>(proxy.xrayProxyMode());
+		const auto chosenMode = box->lifetime().make_state<
+			Core::XrayProxyMode>(proxy.xrayProxyMode());
+		modeGroup->setChangedCallback([=](Core::XrayProxyMode mode) {
+			*chosenMode = mode;
+		});
+		const auto addMode = [&](Core::XrayProxyMode mode, const QString &text) {
+			box->addRow(
+				object_ptr<Ui::Radioenum<Core::XrayProxyMode>>(
+					box,
+					modeGroup,
+					mode,
+					text,
+					st::defaultBoxCheckbox),
+				st::boxOptionListPadding
+					+ QMargins(
+						st::boxPadding.left(),
+						0,
+						st::boxPadding.right(),
+						st::boxOptionListSkip));
+		};
+		addMode(
+			Core::XrayProxyMode::Proxy,
+			tr::lng_xray_proxy_mode_proxy(tr::now));
+		addMode(
+			Core::XrayProxyMode::Vpn,
+			tr::lng_xray_proxy_mode_vpn(tr::now));
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			tr::lng_xray_proxy_fragment_title(),
+			st::settingsAddReplyLabel));
+		const auto fragment = proxy.xrayProxyFragment();
+		const auto fragmentEnabled = box->addRow(object_ptr<Ui::Checkbox>(
+			box,
+			tr::lng_xray_proxy_fragment_enabled(tr::now),
+			fragment.enabled));
+		const auto packets = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::settingsAddReplyField,
+			tr::lng_xray_proxy_fragment_packets(),
+			fragment.packets));
+		const auto length = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::settingsAddReplyField,
+			tr::lng_xray_proxy_fragment_length(),
+			fragment.length));
+		const auto interval = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::settingsAddReplyField,
+			tr::lng_xray_proxy_fragment_interval(),
+			fragment.interval));
+		box->setFocusCallback([=] {
+			field->setFocusFast();
+		});
+		field->selectAll();
+
+		const auto save = [=] {
+			const auto link = field->getLastText().trimmed();
+			if (!Core::XrayProxy::IsSupportedLink(link)) {
+				field->showError();
+				return;
+			}
+			const auto fragment = Core::XrayProxyFragmentSettings{
+				.enabled = fragmentEnabled->checked(),
+				.packets = packets->getLastText().trimmed(),
+				.length = length->getLastText().trimmed(),
+				.interval = interval->getLastText().trimmed(),
+			};
+			const auto result = Core::XrayProxy::Start(
+				link,
+				*chosenMode,
+				fragment);
+			if (!result.success) {
+				field->showError();
+				box->uiShow()->showBox(Ui::MakeInformBox(result.error));
+				return;
+			}
+			auto &proxy = Core::App().settings().proxy();
+			proxy.setXrayProxyLink(link);
+			proxy.setXrayProxyMode(*chosenMode);
+			proxy.setXrayProxyFragment(fragment);
+			proxy.setXrayProxyEnabled(true);
+			proxy.connectionTypeChangesNotify();
+			Core::App().saveSettingsDelayed();
+			box->closeBox();
+		};
+		field->submits(
+		) | rpl::on_next(save, field->lifetime());
+		box->addButton(tr::lng_xray_proxy_connect(), save);
+		box->addButton(tr::lng_cancel(), [=] {
+			box->closeBox();
+		});
+		box->addLeftButton(tr::lng_xray_proxy_disable(), [=] {
+			Core::XrayProxy::Stop();
+			auto &proxy = Core::App().settings().proxy();
+			proxy.setXrayProxyEnabled(false);
+			proxy.connectionTypeChangesNotify();
+			Core::App().setCurrentProxy(
+				proxy.selected(),
+				MTP::ProxyData::Settings::System);
+			Core::App().saveSettingsDelayed();
+			box->closeBox();
+		});
+	}));
+}
 
 void BuildDataStorageSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
@@ -134,6 +264,28 @@ void BuildDataStorageSection(SectionBuilder &builder) {
 				ProxiesBoxController::CreateOwningBox(account));
 		},
 		.keywords = { u"connection"_q, u"proxy"_q, u"network"_q, u"vpn"_q },
+	});
+
+	builder.addButton({
+		.id = u"advanced/xray_proxy"_q,
+		.title = tr::lng_xray_proxy_title(),
+		.icon = { &st::menuIconNetwork },
+		.label = Core::App().settings().proxy().connectionTypeValue(
+		) | rpl::map([] {
+			return Core::XrayProxy::StatusLabel();
+		}),
+		.onClick = [=] {
+			ShowXrayProxyBox(controller);
+		},
+		.keywords = {
+			u"xray"_q,
+			u"vless"_q,
+			u"vmess"_q,
+			u"hysteria2"_q,
+			u"trojan"_q,
+			u"proxy"_q,
+			u"vpn"_q,
+		},
 	});
 
 	const auto showDownloadPath = container
@@ -1033,10 +1185,7 @@ void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
 		.keywords = { u"version"_q, u"update"_q, u"check"_q },
 	});
 
-	const auto version = tr::lng_settings_current_version(
-		tr::now,
-		lt_version,
-		currentVersionText());
+	const auto version = VersionInfoText();
 
 	const auto texts = container
 		? Ui::CreateChild<rpl::event_stream<QString>>(container)
@@ -1424,10 +1573,7 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 		container.get());
 	const auto downloading = Ui::CreateChild<rpl::event_stream<bool>>(
 		container.get());
-	const auto version = tr::lng_settings_current_version(
-		tr::now,
-		lt_version,
-		currentVersionText());
+	const auto version = VersionInfoText();
 	const auto toggle = container->add(object_ptr<Button>(
 		container,
 		tr::lng_settings_update_automatically(),

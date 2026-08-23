@@ -33,6 +33,22 @@ namespace {
 	Unexpected("Bad type in IntToProxySettings");
 }
 
+[[nodiscard]] qint32 XrayProxyModeToInt(XrayProxyMode mode) {
+	switch (mode) {
+	case XrayProxyMode::Proxy: return 0;
+	case XrayProxyMode::Vpn: return 1;
+	}
+	Unexpected("Bad type in XrayProxyModeToInt");
+}
+
+[[nodiscard]] XrayProxyMode IntToXrayProxyMode(qint32 value) {
+	switch (value) {
+	case 0: return XrayProxyMode::Proxy;
+	case 1: return XrayProxyMode::Vpn;
+	}
+	return XrayProxyMode::Proxy;
+}
+
 [[nodiscard]] MTP::ProxyData DeserializeProxyData(const QByteArray &data) {
 	QDataStream stream(data);
 	stream.setVersion(QDataStream::Qt_5_1);
@@ -111,7 +127,13 @@ std::vector<int> NormalizeProxyRotationPreferredIndices(
 } // namespace
 
 SettingsProxy::SettingsProxy()
-: _tryIPv6(!Platform::IsWindows()) {
+: _tryIPv6(!Platform::IsWindows())
+, _xrayProxyFragment({
+	.enabled = true,
+	.packets = u"tlshello"_q,
+	.length = u"50-100"_q,
+	.interval = u"10-20"_q,
+}) {
 }
 
 QByteArray SettingsProxy::serialize() const {
@@ -128,7 +150,12 @@ QByteArray SettingsProxy::serialize() const {
 			0,
 			ranges::plus(),
 			&Serialize::bytearraySize)
-		+ (4 + int(_proxyRotationPreferredIndices.size())) * sizeof(qint32);
+		+ (5 + int(_proxyRotationPreferredIndices.size())) * sizeof(qint32)
+		+ Serialize::stringSize(_xrayProxyLink)
+		+ 2 * sizeof(qint32)
+		+ Serialize::stringSize(_xrayProxyFragment.packets)
+		+ Serialize::stringSize(_xrayProxyFragment.length)
+		+ Serialize::stringSize(_xrayProxyFragment.interval);
 	auto stream = Serialize::ByteArrayWriter(size);
 	stream
 		<< qint32(_tryIPv6 ? 1 : 0)
@@ -147,6 +174,14 @@ QByteArray SettingsProxy::serialize() const {
 	for (const auto index : _proxyRotationPreferredIndices) {
 		stream << qint32(index);
 	}
+	stream
+		<< qint32(_xrayProxyEnabled ? 1 : 0)
+		<< _xrayProxyLink
+		<< XrayProxyModeToInt(_xrayProxyMode)
+		<< qint32(_xrayProxyFragment.enabled ? 1 : 0)
+		<< _xrayProxyFragment.packets
+		<< _xrayProxyFragment.length
+		<< _xrayProxyFragment.interval;
 	return std::move(stream).result();
 }
 
@@ -218,6 +253,35 @@ bool SettingsProxy::setFromSerialized(const QByteArray &serialized) {
 			}
 		}
 	}
+	auto xrayProxyEnabled = qint32(_xrayProxyEnabled ? 1 : 0);
+	if (!stream.atEnd()) {
+		stream >> xrayProxyEnabled;
+	}
+	auto xrayProxyLink = _xrayProxyLink;
+	if (!stream.atEnd()) {
+		stream >> xrayProxyLink;
+	}
+	auto xrayProxyMode = XrayProxyModeToInt(_xrayProxyMode);
+	if (!stream.atEnd()) {
+		stream >> xrayProxyMode;
+	}
+	auto xrayFragmentEnabled = qint32(
+		_xrayProxyFragment.enabled ? 1 : 0);
+	if (!stream.atEnd()) {
+		stream >> xrayFragmentEnabled;
+	}
+	auto xrayFragmentPackets = _xrayProxyFragment.packets;
+	if (!stream.atEnd()) {
+		stream >> xrayFragmentPackets;
+	}
+	auto xrayFragmentLength = _xrayProxyFragment.length;
+	if (!stream.atEnd()) {
+		stream >> xrayFragmentLength;
+	}
+	auto xrayFragmentInterval = _xrayProxyFragment.interval;
+	if (!stream.atEnd()) {
+		stream >> xrayFragmentInterval;
+	}
 
 	if (!stream.ok()) {
 		LOG(("App Error: "
@@ -229,6 +293,15 @@ bool SettingsProxy::setFromSerialized(const QByteArray &serialized) {
 	_useProxyForCalls = (useProxyForCalls == 1);
 	_checkIpWarningShown = (checkIpWarningShown == 1);
 	_proxyRotationEnabled = (proxyRotationEnabled == 1);
+	_xrayProxyEnabled = (xrayProxyEnabled == 1);
+	_xrayProxyLink = std::move(xrayProxyLink);
+	_xrayProxyMode = IntToXrayProxyMode(xrayProxyMode);
+	_xrayProxyFragment = {
+		.enabled = (xrayFragmentEnabled == 1),
+		.packets = std::move(xrayFragmentPackets),
+		.length = std::move(xrayFragmentLength),
+		.interval = std::move(xrayFragmentInterval),
+	};
 	setProxyRotationTimeout(proxyRotationTimeout);
 	_settings = IntToProxySettings(settings);
 	_selected = DeserializeProxyData(selectedProxy);
@@ -320,6 +393,38 @@ bool SettingsProxy::proxyRotationEnabled() const {
 
 void SettingsProxy::setProxyRotationEnabled(bool value) {
 	_proxyRotationEnabled = value;
+}
+
+bool SettingsProxy::xrayProxyEnabled() const {
+	return _xrayProxyEnabled;
+}
+
+void SettingsProxy::setXrayProxyEnabled(bool value) {
+	_xrayProxyEnabled = value;
+}
+
+QString SettingsProxy::xrayProxyLink() const {
+	return _xrayProxyLink;
+}
+
+void SettingsProxy::setXrayProxyLink(QString value) {
+	_xrayProxyLink = std::move(value);
+}
+
+XrayProxyMode SettingsProxy::xrayProxyMode() const {
+	return _xrayProxyMode;
+}
+
+void SettingsProxy::setXrayProxyMode(XrayProxyMode value) {
+	_xrayProxyMode = value;
+}
+
+XrayProxyFragmentSettings SettingsProxy::xrayProxyFragment() const {
+	return _xrayProxyFragment;
+}
+
+void SettingsProxy::setXrayProxyFragment(XrayProxyFragmentSettings value) {
+	_xrayProxyFragment = std::move(value);
 }
 
 int SettingsProxy::proxyRotationTimeout() const {
