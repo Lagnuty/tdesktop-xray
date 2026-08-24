@@ -365,7 +365,9 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 		auto outbound = VmessOutbound(trimmed);
 		const auto settings = outbound.value(u"settings"_q).toObject();
 		const auto vnextList = settings.value(u"vnext"_q).toArray();
-		const auto vnext = vnextList.value(0).toObject();
+		const auto vnext = vnextList.isEmpty()
+			? QJsonObject()
+			: vnextList.at(0).toObject();
 		if (!vnext.value(u"address"_q).toString().isEmpty()
 			&& vnext.value(u"port"_q).toInt() > 0) {
 			return outbound;
