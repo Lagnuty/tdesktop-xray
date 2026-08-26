@@ -96,6 +96,32 @@ jobs:
         shell: bash
         run: find "$LibrariesPath" '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
 
+      - name: Free runner disk space.
+        shell: pwsh
+        run: |
+          Get-PSDrive -PSProvider FileSystem | Format-Table -AutoSize
+          $paths = @(
+            "${env:ProgramFiles}\dotnet",
+            "${env:ProgramFiles(x86)}\Microsoft SDKs",
+            "${env:ProgramFiles(x86)}\Android",
+            "${env:ProgramFiles}\Android",
+            "${env:ProgramFiles}\LLVM",
+            "${env:ProgramFiles}\Microsoft SQL Server",
+            "${env:ProgramFiles}\Git\mingw64\share\doc",
+            "${env:LOCALAPPDATA}\NuGet\Cache",
+            "${env:USERPROFILE}\.cargo",
+            "${env:USERPROFILE}\.rustup",
+            "${env:USERPROFILE}\.ghcup",
+            "${env:USERPROFILE}\.gradle",
+            "${env:USERPROFILE}\AppData\Local\Temp"
+          )
+          foreach ($path in $paths) {
+            if (Test-Path $path) {
+              Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+          Get-PSDrive -PSProvider FileSystem | Format-Table -AutoSize
+
       - name: Build Telegram Desktop.
         run: |
           cd %TBUILD%\%REPO_NAME%\Telegram
@@ -108,7 +134,7 @@ jobs:
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF
-          cmake --build ..\out --config Debug --parallel --target Telegram
+          cmake --build ..\out --config Debug --parallel 2 --target Telegram
 
       - name: Download Xray.
         shell: pwsh
