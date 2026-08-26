@@ -1,6 +1,7 @@
 name: Windows.
 
 on:
+  workflow_dispatch:
   push:
     paths-ignore:
       - 'docs/**'
@@ -233,6 +234,18 @@ jobs:
 
           cmake --build ..\out --config Debug --parallel
 
+      - name: Download Xray.
+        if: env.ONLY_CACHE == 'false' && matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $release = Invoke-RestMethod https://api.github.com/repos/XTLS/Xray-core/releases/latest
+          $asset = $release.assets | Where-Object { $_.name -eq 'Xray-windows-64.zip' } | Select-Object -First 1
+          if (-not $asset) { throw 'Xray-windows-64.zip was not found in the latest Xray release.' }
+          $zip = Join-Path $env:RUNNER_TEMP 'xray.zip'
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
+          Expand-Archive -LiteralPath $zip -DestinationPath $env:RUNNER_TEMP\xray
+          Copy-Item -LiteralPath $env:RUNNER_TEMP\xray\xray.exe -Destination $env:TBUILD\$env:REPO_NAME\out\Debug\xray.exe
+
       - name: Move artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly')
         run: |
@@ -240,6 +253,7 @@ jobs:
           mkdir artifact
           move %OUT%\Telegram.exe artifact/
           move %OUT%\Updater.exe artifact/
+          if exist %OUT%\xray.exe move %OUT%\xray.exe artifact/
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly')
