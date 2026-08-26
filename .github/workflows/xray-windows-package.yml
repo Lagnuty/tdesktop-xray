@@ -13,6 +13,7 @@ jobs:
     runs-on: windows-2022
 
     env:
+      CACHE_COMPAT: cppwinrt-2503035
       PREPARE_PATH: Telegram/build/prepare/prepare.py
       TBUILD: ${{ github.workspace }}\TBuild
       LibrariesPath: ${{ github.workspace }}\TBuild\Libraries\win64
@@ -68,8 +69,8 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ env.TBUILD }}\ThirdParty
-          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ runner.arch }}-third-party-
+          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_COMPAT }}-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_COMPAT }}-
 
       - name: Libraries cache.
         uses: actions/cache@v6
@@ -80,8 +81,8 @@ jobs:
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-x64-libs-v2-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-x64-libs-v2-
+          key: ${{ runner.OS }}-x64-libs-v2-${{ env.CACHE_COMPAT }}-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-x64-libs-v2-${{ env.CACHE_COMPAT }}-
 
       - name: Qt cache.
         uses: actions/cache@v6
@@ -89,8 +90,8 @@ jobs:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-x64-qt6-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-x64-qt6-
+          key: ${{ runner.OS }}-x64-qt6-${{ env.CACHE_COMPAT }}-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-x64-qt6-${{ env.CACHE_COMPAT }}-
 
       - name: Libraries.
         run: |
