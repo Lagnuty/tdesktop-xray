@@ -6,7 +6,7 @@ on:
 jobs:
   windows-x64:
     name: Windows x64 Xray package
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     env:
       PREPARE_PATH: Telegram/build/prepare/prepare.py
