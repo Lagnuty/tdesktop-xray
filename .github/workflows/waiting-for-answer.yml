@@ -1,6 +1,7 @@
 name: Waiting for answer.
 
 on:
+  workflow_dispatch:
   issue_comment:
     types: [created]
   schedule:
