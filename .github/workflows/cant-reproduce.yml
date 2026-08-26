@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 3 * * *'
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
   cant-reproduce:
     runs-on: ubuntu-slim
