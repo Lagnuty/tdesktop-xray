@@ -3,6 +3,10 @@ name: Xray Windows package
 on:
   workflow_dispatch:
 
+concurrency:
+  group: xray-windows-package
+  cancel-in-progress: true
+
 jobs:
   windows-x64:
     name: Windows x64 Xray package
