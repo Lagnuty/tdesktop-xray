@@ -65,6 +65,24 @@ jobs:
           nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
           nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
 
+      - name: C++ WinRT headers.
+        shell: pwsh
+        run: |
+          $version = '2.0.250303.5'
+          $packages = Join-Path $env:TBUILD 'ThirdParty\NuGet'
+          nuget install Microsoft.Windows.CppWinRT `
+            -Version $version `
+            -OutputDirectory $packages `
+            -NonInteractive `
+            -DirectDownload
+          $include = Join-Path $packages "Microsoft.Windows.CppWinRT.$version\build\native\include"
+          if (-not (Test-Path (Join-Path $include 'winrt\base.h') -PathType Leaf)) {
+            throw "C++/WinRT include path was not found: $include"
+          }
+          "CPPWINRT_INCLUDE=$include" >> $env:GITHUB_ENV
+          "INCLUDE=$include;$env:INCLUDE" >> $env:GITHUB_ENV
+          "EXTERNAL_INCLUDE=$include;$env:EXTERNAL_INCLUDE" >> $env:GITHUB_ENV
+
       - name: ThirdParty cache.
         uses: actions/cache@v6
         with:
