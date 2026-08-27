@@ -101,8 +101,7 @@ using namespace Builder;
 	return tr::lng_settings_current_version(
 		tr::now,
 		lt_version,
-		currentVersionText()
-	) + '\n' + Core::XrayProxy::VersionText();
+		currentVersionText());
 }
 
 void ShowXrayProxyBox(not_null<Window::SessionController*> controller) {
