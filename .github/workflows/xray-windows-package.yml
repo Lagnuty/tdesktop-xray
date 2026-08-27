@@ -2,10 +2,26 @@ name: Xray Windows package
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag. Empty means xray-v<app version>-run<run number>."
+        required: false
+        default: ""
+      prerelease:
+        description: "Publish as prerelease."
+        required: false
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'xray-v*'
 
 concurrency:
   group: xray-windows-package
   cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
   windows-x64:
@@ -176,7 +192,7 @@ jobs:
           -D CMAKE_CONFIGURATION_TYPES=Debug ^
           -D CMAKE_COMPILE_WARNING_AS_ERROR=ON ^
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
-          -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
+          -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF
           cmake --build ..\out --config Debug --parallel 2 --target Telegram
 
@@ -208,3 +224,38 @@ jobs:
         with:
           name: Telegram Xray Windows x64 package
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}\out\Debug\xray-package\
+
+      - name: Resolve release tag.
+        shell: pwsh
+        run: |
+          $tag = '${{ github.event.inputs.tag }}'
+          if (-not $tag) {
+            if ($env:GITHUB_REF_TYPE -eq 'tag') {
+              $tag = $env:GITHUB_REF_NAME
+            } else {
+              $versionLine = Get-Content "$env:TBUILD\$env:REPO_NAME\Telegram\build\version" |
+                Where-Object { $_ -match '^AppVersionStr\s+' } |
+                Select-Object -First 1
+              $version = ($versionLine -split '\s+')[1]
+              $tag = "xray-v$version-run$env:GITHUB_RUN_NUMBER"
+            }
+          }
+          $prerelease = if ($env:GITHUB_REF_TYPE -eq 'tag') { 'false' } else { '${{ github.event.inputs.prerelease }}' }
+          "XRAY_RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          "XRAY_RELEASE_NAME=Telegram Xray $tag" >> $env:GITHUB_ENV
+          "XRAY_PRERELEASE=$prerelease" >> $env:GITHUB_ENV
+
+      - name: Publish GitHub release.
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.XRAY_RELEASE_TAG }}
+          name: ${{ env.XRAY_RELEASE_NAME }}
+          prerelease: ${{ env.XRAY_PRERELEASE }}
+          body: |
+            Telegram Desktop Xray build.
+
+            Assets include Telegram Desktop, Updater.exe, and xray.exe.
+            Use the installer for a normal install or the portable zip for a separate portable copy.
+          files: |
+            ${{ env.TBUILD }}\${{ env.REPO_NAME }}\out\Debug\xray-package\*.zip
+            ${{ env.TBUILD }}\${{ env.REPO_NAME }}\out\Debug\xray-package\*.exe
