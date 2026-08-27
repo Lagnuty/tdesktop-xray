@@ -1,6 +1,7 @@
 name: MacOS.
 
 on:
+  workflow_dispatch:
   push:
     paths-ignore:
       - 'docs/**'
@@ -117,6 +118,25 @@ jobs:
           $DEFINE
 
           cmake --build ../out --config Debug --parallel
+
+      - name: Download Xray.
+        if: env.ONLY_CACHE == 'false'
+        run: |
+          if [ "$(uname -m)" = "arm64" ]; then
+            XRAY_ASSET="Xray-macos-arm64-v8a.zip"
+          else
+            XRAY_ASSET="Xray-macos-64.zip"
+          fi
+          RELEASE_JSON="$(mktemp)"
+          curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest -o "$RELEASE_JSON"
+          XRAY_URL="$(
+            python3 -c 'import json, sys; release = json.load(open(sys.argv[1], encoding="utf-8")); url = next((asset["browser_download_url"] for asset in release["assets"] if asset["name"] == sys.argv[2]), None); sys.exit(f"{sys.argv[2]} was not found in the latest Xray release.") if url is None else print(url)' "$RELEASE_JSON" "$XRAY_ASSET"
+          )"
+          curl -fsSL "$XRAY_URL" -o "$RUNNER_TEMP/xray.zip"
+          mkdir -p "$RUNNER_TEMP/xray"
+          unzip -q "$RUNNER_TEMP/xray.zip" -d "$RUNNER_TEMP/xray"
+          install -m 755 "$RUNNER_TEMP/xray/xray" \
+            "$REPO_NAME/out/Debug/Telegram.app/Contents/Frameworks/xray"
 
       - name: Move artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
