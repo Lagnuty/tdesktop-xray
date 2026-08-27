@@ -29,7 +29,7 @@ jobs:
     runs-on: windows-2022
 
     env:
-      CACHE_COMPAT: cppwinrt-2503031
+      CACHE_COMPAT: cppwinrt-2503035
       PREPARE_PATH: Telegram/build/prepare/prepare.py
       TBUILD: ${{ github.workspace }}\TBuild
       LibrariesPath: ${{ github.workspace }}\TBuild\Libraries\win64
@@ -84,7 +84,7 @@ jobs:
       - name: C++ WinRT headers.
         shell: pwsh
         run: |
-          $version = '2.0.250303.1'
+          $version = '2.0.250303.5'
           $packages = Join-Path $env:TBUILD 'ThirdParty\NuGet'
           $package = Join-Path $packages "Microsoft.Windows.CppWinRT.$version"
           $nupkg = Join-Path $env:RUNNER_TEMP "Microsoft.Windows.CppWinRT.$version.zip"
