@@ -41,6 +41,10 @@ on:
       - 'Telegram/configure.sh'
       - 'Telegram/Telegram.plist'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
 
   windows:
@@ -297,7 +301,6 @@ jobs:
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF ^
-          -D TDESKTOP_FORCE_APPDATA_WORKDIR=ON ^
           %TDESKTOP_BUILD_DEFINE%
 
           cmake --build ..\out --config Debug --parallel 2 --target Telegram
@@ -322,6 +325,7 @@ jobs:
           move %OUT%\Telegram.exe artifact/
           move %OUT%\Updater.exe artifact/
           if exist %OUT%\xray.exe move %OUT%\xray.exe artifact/
+          copy %TBUILD%\%REPO_NAME%\Telegram\build\run_xray_with_user_settings.cmd "artifact\Telegram Xray.cmd"
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly')

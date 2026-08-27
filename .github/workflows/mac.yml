@@ -37,6 +37,10 @@ on:
       - 'Telegram/SourceFiles/platform/linux/**'
       - 'Telegram/configure.bat'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
 
   macos:
@@ -115,7 +119,6 @@ jobs:
           -D TDESKTOP_API_TEST=ON \
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
-          -D TDESKTOP_FORCE_APPDATA_WORKDIR=ON \
           $DEFINE
 
           cmake --build ../out --config Debug --parallel

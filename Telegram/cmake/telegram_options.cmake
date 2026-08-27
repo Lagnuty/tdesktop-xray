@@ -48,11 +48,6 @@ if (DESKTOP_APP_USE_PACKAGED)
     target_compile_definitions(Telegram PRIVATE TDESKTOP_USE_PACKAGED)
 endif()
 
-option(TDESKTOP_FORCE_APPDATA_WORKDIR "Use the platform app data working folder in debug builds." OFF)
-if (TDESKTOP_FORCE_APPDATA_WORKDIR)
-    target_compile_definitions(Telegram PRIVATE TDESKTOP_FORCE_APPDATA_WORKDIR)
-endif()
-
 if (DESKTOP_APP_SPECIAL_TARGET)
     target_compile_definitions(Telegram PRIVATE TDESKTOP_ALLOW_CLOSED_ALPHA)
 endif()
