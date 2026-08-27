@@ -56,6 +56,7 @@ SignTool=sha256
 #endif
 
 #define ModulesFolder "modules\" + ArchModulesFolder
+#define D3DCompilerPath ReleasePath + "\" + ModulesFolder + "\d3d\d3dcompiler_47.dll"
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -76,7 +77,9 @@ Source: "{#ReleasePath}\Telegram.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ReleasePath}\Updater.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ReleasePath}\xray.exe"; DestDir: "{app}"; Flags: ignoreversion
 #if MyBuildTarget != "winarm"
-Source: "{#ReleasePath}\{#ModulesFolder}\d3d\d3dcompiler_47.dll"; DestDir: "{app}\{#ModulesFolder}\d3d"; Flags: ignoreversion
+  #if FileExists(D3DCompilerPath)
+Source: "{#D3DCompilerPath}"; DestDir: "{app}\{#ModulesFolder}\d3d"; Flags: ignoreversion
+  #endif
 #endif
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
