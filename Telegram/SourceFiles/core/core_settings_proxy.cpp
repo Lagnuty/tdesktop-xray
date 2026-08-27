@@ -49,6 +49,51 @@ namespace {
 	return XrayProxyMode::Proxy;
 }
 
+[[nodiscard]] QByteArray SerializeXrayProfile(
+		const XrayProxyProfile &profile) {
+	auto result = QByteArray();
+	const auto size = Serialize::stringSize(profile.name)
+		+ Serialize::stringSize(profile.link)
+		+ 2 * sizeof(qint32)
+		+ Serialize::stringSize(profile.fragment.packets)
+		+ Serialize::stringSize(profile.fragment.length)
+		+ Serialize::stringSize(profile.fragment.interval);
+	result.reserve(size);
+	{
+		QDataStream stream(&result, QIODevice::WriteOnly);
+		stream.setVersion(QDataStream::Qt_5_1);
+		stream
+			<< profile.name
+			<< profile.link
+			<< XrayProxyModeToInt(profile.mode)
+			<< qint32(profile.fragment.enabled ? 1 : 0)
+			<< profile.fragment.packets
+			<< profile.fragment.length
+			<< profile.fragment.interval;
+	}
+	return result;
+}
+
+[[nodiscard]] XrayProxyProfile DeserializeXrayProfile(
+		const QByteArray &data) {
+	auto result = XrayProxyProfile();
+	QDataStream stream(data);
+	stream.setVersion(QDataStream::Qt_5_1);
+	auto mode = XrayProxyModeToInt(result.mode);
+	auto fragmentEnabled = qint32(result.fragment.enabled ? 1 : 0);
+	stream
+		>> result.name
+		>> result.link
+		>> mode
+		>> fragmentEnabled
+		>> result.fragment.packets
+		>> result.fragment.length
+		>> result.fragment.interval;
+	result.mode = IntToXrayProxyMode(mode);
+	result.fragment.enabled = (fragmentEnabled == 1);
+	return result;
+}
+
 [[nodiscard]] MTP::ProxyData DeserializeProxyData(const QByteArray &data) {
 	QDataStream stream(data);
 	stream.setVersion(QDataStream::Qt_5_1);
@@ -141,6 +186,9 @@ QByteArray SettingsProxy::serialize() const {
 	const auto serializedList = ranges::views::all(
 		_list
 	) | ranges::views::transform(SerializeProxyData) | ranges::to_vector;
+	const auto serializedXrayProfiles = ranges::views::all(
+		_xrayProxyProfiles
+	) | ranges::views::transform(SerializeXrayProfile) | ranges::to_vector;
 
 	const auto size = 3 * sizeof(qint32)
 		+ Serialize::bytearraySize(serializedSelected)
@@ -155,7 +203,14 @@ QByteArray SettingsProxy::serialize() const {
 		+ 2 * sizeof(qint32)
 		+ Serialize::stringSize(_xrayProxyFragment.packets)
 		+ Serialize::stringSize(_xrayProxyFragment.length)
-		+ Serialize::stringSize(_xrayProxyFragment.interval);
+		+ Serialize::stringSize(_xrayProxyFragment.interval)
+		+ Serialize::stringSize(_xrayProxyBinaryPath)
+		+ 2 * sizeof(qint32)
+		+ ranges::accumulate(
+			serializedXrayProfiles,
+			0,
+			ranges::plus(),
+			&Serialize::bytearraySize);
 	auto stream = Serialize::ByteArrayWriter(size);
 	stream
 		<< qint32(_tryIPv6 ? 1 : 0)
@@ -181,7 +236,13 @@ QByteArray SettingsProxy::serialize() const {
 		<< qint32(_xrayProxyFragment.enabled ? 1 : 0)
 		<< _xrayProxyFragment.packets
 		<< _xrayProxyFragment.length
-		<< _xrayProxyFragment.interval;
+		<< _xrayProxyFragment.interval
+		<< _xrayProxyBinaryPath
+		<< qint32(_xrayProxyProfileIndex)
+		<< qint32(_xrayProxyProfiles.size());
+	for (const auto &profile : serializedXrayProfiles) {
+		stream << profile;
+	}
 	return std::move(stream).result();
 }
 
@@ -282,6 +343,33 @@ bool SettingsProxy::setFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> xrayFragmentInterval;
 	}
+	auto xrayBinaryPath = _xrayProxyBinaryPath;
+	if (!stream.atEnd()) {
+		stream >> xrayBinaryPath;
+	}
+	auto xrayProfileIndex = qint32(_xrayProxyProfileIndex);
+	if (!stream.atEnd()) {
+		stream >> xrayProfileIndex;
+	}
+	auto xrayProfileCount = qint32(_xrayProxyProfiles.size());
+	auto xrayProfiles = std::vector<XrayProxyProfile>();
+	if (!stream.atEnd()) {
+		stream >> xrayProfileCount;
+		if (stream.ok()) {
+			if (xrayProfileCount < 0) {
+				return false;
+			}
+			xrayProfiles.reserve(xrayProfileCount);
+			for (auto i = 0; i != xrayProfileCount; ++i) {
+				QByteArray data;
+				stream >> data;
+				auto profile = DeserializeXrayProfile(data);
+				if (!profile.link.isEmpty()) {
+					xrayProfiles.push_back(std::move(profile));
+				}
+			}
+		}
+	}
 
 	if (!stream.ok()) {
 		LOG(("App Error: "
@@ -302,6 +390,12 @@ bool SettingsProxy::setFromSerialized(const QByteArray &serialized) {
 		.length = std::move(xrayFragmentLength),
 		.interval = std::move(xrayFragmentInterval),
 	};
+	_xrayProxyBinaryPath = std::move(xrayBinaryPath);
+	_xrayProxyProfiles = std::move(xrayProfiles);
+	_xrayProxyProfileIndex = (xrayProfileIndex >= 0
+		&& xrayProfileIndex < int(_xrayProxyProfiles.size()))
+		? xrayProfileIndex
+		: -1;
 	setProxyRotationTimeout(proxyRotationTimeout);
 	_settings = IntToProxySettings(settings);
 	_selected = DeserializeProxyData(selectedProxy);
@@ -425,6 +519,50 @@ XrayProxyFragmentSettings SettingsProxy::xrayProxyFragment() const {
 
 void SettingsProxy::setXrayProxyFragment(XrayProxyFragmentSettings value) {
 	_xrayProxyFragment = std::move(value);
+}
+
+QString SettingsProxy::xrayProxyBinaryPath() const {
+	return _xrayProxyBinaryPath;
+}
+
+void SettingsProxy::setXrayProxyBinaryPath(QString value) {
+	_xrayProxyBinaryPath = std::move(value);
+}
+
+int SettingsProxy::xrayProxyProfileIndex() const {
+	return _xrayProxyProfileIndex;
+}
+
+void SettingsProxy::setXrayProxyProfileIndex(int value) {
+	_xrayProxyProfileIndex = (value >= 0
+		&& value < int(_xrayProxyProfiles.size()))
+		? value
+		: -1;
+}
+
+const std::vector<XrayProxyProfile> &SettingsProxy::xrayProxyProfiles() const {
+	return _xrayProxyProfiles;
+}
+
+void SettingsProxy::setXrayProxyProfiles(std::vector<XrayProxyProfile> value) {
+	_xrayProxyProfiles = std::move(value);
+	setXrayProxyProfileIndex(_xrayProxyProfileIndex);
+}
+
+void SettingsProxy::upsertXrayProxyProfile(XrayProxyProfile value) {
+	if (value.name.trimmed().isEmpty()) {
+		value.name = u"Xray"_q;
+	}
+	for (auto i = begin(_xrayProxyProfiles);
+			i != end(_xrayProxyProfiles); ++i) {
+		if (i->name == value.name) {
+			*i = std::move(value);
+			_xrayProxyProfileIndex = int(i - begin(_xrayProxyProfiles));
+			return;
+		}
+	}
+	_xrayProxyProfiles.push_back(std::move(value));
+	_xrayProxyProfileIndex = int(_xrayProxyProfiles.size()) - 1;
 }
 
 int SettingsProxy::proxyRotationTimeout() const {

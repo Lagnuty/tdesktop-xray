@@ -9,12 +9,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "core/file_utilities.h"
 #include "lang/lang_keys.h"
 #include "settings.h"
 
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QDir>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -23,8 +25,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
 #include <QtNetwork/QHostAddress>
+#include <QtNetwork/QTcpSocket>
 #include <QtNetwork/QTcpServer>
 
+#include <algorithm>
 #include <optional>
 
 namespace Core::XrayProxy {
@@ -57,7 +61,19 @@ struct State {
 	return cWorkingDir() + u"tdata/xray/telegram-xray.json"_q;
 }
 
+[[nodiscard]] QString TestConfigPath() {
+	return cWorkingDir() + u"tdata/xray/telegram-xray-test.json"_q;
+}
+
+[[nodiscard]] QString LogPath() {
+	return cWorkingDir() + u"tdata/xray/telegram-xray.log"_q;
+}
+
 [[nodiscard]] QString XrayPath() {
+	const auto custom = Core::App().settings().proxy().xrayProxyBinaryPath();
+	if (!custom.isEmpty() && QFile::exists(custom)) {
+		return custom;
+	}
 #ifdef Q_OS_WIN
 	const auto exePath = cExeDir() + u"xray.exe"_q;
 	if (QFile::exists(exePath)) {
@@ -416,6 +432,8 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 		};
 	const auto config = QJsonObject{
 		{ u"log"_q, QJsonObject{
+			{ u"access"_q, LogPath() },
+			{ u"error"_q, LogPath() },
 			{ u"loglevel"_q, u"warning"_q },
 		} },
 		{ u"inbounds"_q, QJsonArray{ inbound } },
@@ -424,14 +442,32 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 	return QJsonDocument(config).toJson(QJsonDocument::Indented);
 }
 
-[[nodiscard]] bool WriteConfig(const QByteArray &config) {
-	const auto path = ConfigPath();
+[[nodiscard]] bool WriteConfig(const QByteArray &config, const QString &path) {
 	QDir().mkpath(QFileInfo(path).absolutePath());
 	auto file = QFile(path);
 	if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
 		return false;
 	}
 	return file.write(config) == config.size();
+}
+
+[[nodiscard]] bool WriteConfig(const QByteArray &config) {
+	return WriteConfig(config, ConfigPath());
+}
+
+void AppendLog(const QString &text) {
+	if (text.isEmpty()) {
+		return;
+	}
+	const auto path = LogPath();
+	QDir().mkpath(QFileInfo(path).absolutePath());
+	auto file = QFile(path);
+	if (file.open(QIODevice::WriteOnly | QIODevice::Append)) {
+		file.write(text.toUtf8());
+		if (!text.endsWith('\n')) {
+			file.write("\n", 1);
+		}
+	}
 }
 
 void ApplyLocalProxy(uint32 port) {
@@ -453,34 +489,43 @@ bool IsSupportedLink(const QString &link) {
 		|| scheme == u"hy2"_q;
 }
 
+QString BinaryPath() {
+	return XrayPath();
+}
+
+QString ConfigFilePath() {
+	return ConfigPath();
+}
+
+QString LogFilePath() {
+	return LogPath();
+}
+
 QString VersionText() {
-	static const auto result = [] {
-		const auto xray = XrayPath();
-		if (xray.isEmpty() || !QFile::exists(xray)) {
-			return tr::lng_xray_proxy_version_missing(tr::now);
-		}
-		auto process = QProcess();
-		process.setProgram(xray);
-		process.setArguments({ u"version"_q });
-		process.setWorkingDirectory(QFileInfo(xray).absolutePath());
-		process.start();
-		if (!process.waitForFinished(1500)) {
-			process.kill();
-			process.waitForFinished(500);
-			return tr::lng_xray_proxy_version_unknown(tr::now);
-		}
-		const auto output = QString::fromUtf8(
-			process.readAllStandardOutput()
-				+ process.readAllStandardError());
-		const auto version = ExtractVersion(output);
-		return version.isEmpty()
-			? tr::lng_xray_proxy_version_unknown(tr::now)
-			: tr::lng_xray_proxy_version(
-				tr::now,
-				lt_version,
-				version);
-	}();
-	return result;
+	const auto xray = XrayPath();
+	if (xray.isEmpty() || !QFile::exists(xray)) {
+		return tr::lng_xray_proxy_version_missing(tr::now);
+	}
+	auto process = QProcess();
+	process.setProgram(xray);
+	process.setArguments({ u"version"_q });
+	process.setWorkingDirectory(QFileInfo(xray).absolutePath());
+	process.start();
+	if (!process.waitForFinished(1500)) {
+		process.kill();
+		process.waitForFinished(500);
+		return tr::lng_xray_proxy_version_unknown(tr::now);
+	}
+	const auto output = QString::fromUtf8(
+		process.readAllStandardOutput()
+			+ process.readAllStandardError());
+	const auto version = ExtractVersion(output);
+	return version.isEmpty()
+		? tr::lng_xray_proxy_version_unknown(tr::now)
+		: tr::lng_xray_proxy_version(
+			tr::now,
+			lt_version,
+			version);
 }
 
 QString StatusLabel() {
@@ -489,9 +534,83 @@ QString StatusLabel() {
 		return tr::lng_xray_proxy_disabled(tr::now);
 	}
 	const auto &state = GlobalState();
-	return state.process
+	return (state.process
+			&& state.process->state() != QProcess::NotRunning)
 		? tr::lng_xray_proxy_active(tr::now)
 		: tr::lng_xray_proxy_configured(tr::now);
+}
+
+Status CurrentStatus() {
+	const auto &settings = Core::App().settings().proxy();
+	const auto &state = GlobalState();
+	return {
+		.supported = PlatformSupported(),
+		.enabled = settings.xrayProxyEnabled(),
+		.running = (state.process
+			&& state.process->state() != QProcess::NotRunning),
+		.port = state.port,
+		.binaryPath = XrayPath(),
+		.configPath = ConfigPath(),
+		.logPath = LogPath(),
+		.version = VersionText(),
+	};
+}
+
+StartResult TestConfig(
+		const QString &link,
+		XrayProxyMode mode,
+		const XrayProxyFragmentSettings &fragment) {
+	if (!PlatformSupported()) {
+		return { false, tr::lng_xray_proxy_platform_unsupported(tr::now), 0 };
+	}
+	if (!IsSupportedLink(link)) {
+		return { false, tr::lng_xray_proxy_invalid_link(tr::now), 0 };
+	}
+	if (!IsValidFragment(fragment)) {
+		return { false, tr::lng_xray_proxy_invalid_fragment(tr::now), 0 };
+	}
+	const auto xray = XrayPath();
+	if (xray.isEmpty() || !QFile::exists(xray)) {
+		return { false, tr::lng_xray_proxy_missing_binary(tr::now), 0 };
+	}
+	const auto port = (mode == XrayProxyMode::Proxy) ? AllocatePort() : 0;
+	if (mode == XrayProxyMode::Proxy && !port) {
+		return { false, tr::lng_xray_proxy_port_failed(tr::now), 0 };
+	}
+	const auto config = BuildConfig(link, port, mode, fragment);
+	if (!config || !WriteConfig(*config, TestConfigPath())) {
+		return { false, tr::lng_xray_proxy_config_failed(tr::now), 0 };
+	}
+	auto process = QProcess();
+	process.setProgram(xray);
+	process.setArguments({
+		u"run"_q,
+		u"-test"_q,
+		u"-config"_q,
+		TestConfigPath(),
+	});
+	process.setWorkingDirectory(QFileInfo(xray).absolutePath());
+	process.start();
+	if (!process.waitForFinished(5000)) {
+		process.kill();
+		process.waitForFinished(1000);
+		return { false, tr::lng_xray_proxy_config_test_failed(tr::now), 0 };
+	}
+	const auto output = QString::fromUtf8(
+		process.readAllStandardOutput()
+			+ process.readAllStandardError());
+	AppendLog(output);
+	if (process.exitStatus() != QProcess::NormalExit
+		|| process.exitCode() != 0) {
+		return {
+			false,
+			output.isEmpty()
+				? tr::lng_xray_proxy_config_test_failed(tr::now)
+				: output.trimmed(),
+			0,
+		};
+	}
+	return { true, QString(), port };
 }
 
 StartResult Start(
@@ -527,15 +646,24 @@ StartResult Start(
 	if (!config || !WriteConfig(*config)) {
 		return { false, tr::lng_xray_proxy_config_failed(tr::now), 0 };
 	}
+	const auto test = TestConfig(link, mode, fragment);
+	if (!test.success) {
+		return test;
+	}
 	auto process = std::make_unique<QProcess>();
 	process->setProgram(xray);
 	process->setArguments({ u"run"_q, u"-config"_q, ConfigPath() });
 	process->setWorkingDirectory(QFileInfo(xray).absolutePath());
+	process->setStandardOutputFile(LogPath(), QIODevice::Append);
+	process->setStandardErrorFile(LogPath(), QIODevice::Append);
 	process->start();
 	if (!process->waitForStarted(5000)) {
 		return { false, tr::lng_xray_proxy_start_failed(tr::now), 0 };
 	}
 	if (process->waitForFinished(300)) {
+		AppendLog(QString::fromUtf8(
+			process->readAllStandardOutput()
+				+ process->readAllStandardError()));
 		return { false, tr::lng_xray_proxy_start_failed(tr::now), 0 };
 	}
 	state.process = std::move(process);
@@ -560,6 +688,52 @@ StartResult Start(const QString &link) {
 		link,
 		settings.xrayProxyMode(),
 		settings.xrayProxyFragment());
+}
+
+StartResult Restart() {
+	const auto &settings = Core::App().settings().proxy();
+	if (!settings.xrayProxyEnabled()) {
+		return { false, tr::lng_xray_proxy_disabled(tr::now), 0 };
+	}
+	Stop();
+	return Start(
+		settings.xrayProxyLink(),
+		settings.xrayProxyMode(),
+		settings.xrayProxyFragment());
+}
+
+QString RecentLogText(int maxLines) {
+	auto file = QFile(LogPath());
+	if (!file.open(QIODevice::ReadOnly)) {
+		return QString();
+	}
+	const auto lines = QString::fromUtf8(file.readAll()).split('\n');
+	const auto from = std::max(0, lines.size() - maxLines);
+	return lines.mid(from).join('\n').trimmed();
+}
+
+int TestLatency() {
+	const auto &state = GlobalState();
+	if (!state.process || !state.port) {
+		return -1;
+	}
+	auto timer = QElapsedTimer();
+	auto socket = QTcpSocket();
+	timer.start();
+	socket.connectToHost(QHostAddress::LocalHost, state.port);
+	if (!socket.waitForConnected(3000)) {
+		return -1;
+	}
+	socket.disconnectFromHost();
+	return int(timer.elapsed());
+}
+
+void OpenLogFile() {
+	File::ShowInFolder(LogPath());
+}
+
+void OpenLatestRelease() {
+	File::OpenUrl(u"https://github.com/XTLS/Xray-core/releases/latest"_q);
 }
 
 void Stop() {

@@ -104,6 +104,32 @@ using namespace Builder;
 		currentVersionText());
 }
 
+[[nodiscard]] QString XrayStatusText() {
+	const auto status = Core::XrayProxy::CurrentStatus();
+	return tr::lng_xray_proxy_status_details(
+		tr::now,
+		lt_status,
+		Core::XrayProxy::StatusLabel(),
+		lt_version,
+		status.version,
+		lt_port,
+		status.port ? QString::number(status.port) : u"-"_q,
+		lt_path,
+		status.binaryPath.isEmpty() ? u"-"_q : status.binaryPath);
+}
+
+[[nodiscard]] QString XrayProfilesText() {
+	const auto &profiles = Core::App().settings().proxy().xrayProxyProfiles();
+	if (profiles.empty()) {
+		return tr::lng_xray_proxy_profiles_empty(tr::now);
+	}
+	auto result = QStringList();
+	for (const auto &profile : profiles) {
+		result.push_back(profile.name);
+	}
+	return result.join(u", "_q);
+}
+
 void ShowXrayProxyBox(not_null<Window::SessionController*> controller) {
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
 		auto &proxy = Core::App().settings().proxy();
@@ -112,11 +138,38 @@ void ShowXrayProxyBox(not_null<Window::SessionController*> controller) {
 			box,
 			tr::lng_xray_proxy_about(),
 			st::settingsAddReplyLabel));
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			XrayStatusText(),
+			st::settingsAddReplyLabel));
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			tr::lng_xray_proxy_profiles(
+				tr::now,
+				lt_profiles,
+				XrayProfilesText()),
+			st::settingsAddReplyLabel));
+		const auto profileName = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::settingsAddReplyField,
+			tr::lng_xray_proxy_profile_name(),
+			[&] {
+				const auto index = proxy.xrayProxyProfileIndex();
+				const auto &profiles = proxy.xrayProxyProfiles();
+				return (index >= 0 && index < int(profiles.size()))
+					? profiles[index].name
+					: QString();
+			}()));
 		const auto field = box->addRow(object_ptr<Ui::InputField>(
 			box,
 			st::settingsAddReplyField,
 			tr::lng_xray_proxy_link_placeholder(),
 			proxy.xrayProxyLink()));
+		const auto binaryPath = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::settingsAddReplyField,
+			tr::lng_xray_proxy_binary_path(),
+			proxy.xrayProxyBinaryPath()));
 		const auto modeGroup = std::make_shared<Ui::RadioenumGroup<
 			Core::XrayProxyMode>>(proxy.xrayProxyMode());
 		const auto chosenMode = box->lifetime().make_state<
@@ -174,18 +227,40 @@ void ShowXrayProxyBox(not_null<Window::SessionController*> controller) {
 		});
 		field->selectAll();
 
+		const auto collectFragment = [=] {
+			return Core::XrayProxyFragmentSettings{
+				.enabled = fragmentEnabled->checked(),
+				.packets = packets->getLastText().trimmed(),
+				.length = length->getLastText().trimmed(),
+				.interval = interval->getLastText().trimmed(),
+			};
+		};
+		const auto saveSettings = [=](
+				const QString &link,
+				const Core::XrayProxyFragmentSettings &fragment) {
+			auto &proxy = Core::App().settings().proxy();
+			proxy.setXrayProxyLink(link);
+			proxy.setXrayProxyMode(*chosenMode);
+			proxy.setXrayProxyFragment(fragment);
+			proxy.upsertXrayProxyProfile({
+				.name = profileName->getLastText().trimmed(),
+				.link = link,
+				.mode = *chosenMode,
+				.fragment = fragment,
+			});
+			proxy.setXrayProxyEnabled(true);
+			proxy.connectionTypeChangesNotify();
+			Core::App().saveSettingsDelayed();
+		};
 		const auto save = [=] {
 			const auto link = field->getLastText().trimmed();
 			if (!Core::XrayProxy::IsSupportedLink(link)) {
 				field->showError();
 				return;
 			}
-			const auto fragment = Core::XrayProxyFragmentSettings{
-				.enabled = fragmentEnabled->checked(),
-				.packets = packets->getLastText().trimmed(),
-				.length = length->getLastText().trimmed(),
-				.interval = interval->getLastText().trimmed(),
-			};
+			const auto fragment = collectFragment();
+			auto &proxy = Core::App().settings().proxy();
+			proxy.setXrayProxyBinaryPath(binaryPath->getLastText().trimmed());
 			const auto result = Core::XrayProxy::Start(
 				link,
 				*chosenMode,
@@ -195,20 +270,90 @@ void ShowXrayProxyBox(not_null<Window::SessionController*> controller) {
 				box->uiShow()->showBox(Ui::MakeInformBox(result.error));
 				return;
 			}
-			auto &proxy = Core::App().settings().proxy();
-			proxy.setXrayProxyLink(link);
-			proxy.setXrayProxyMode(*chosenMode);
-			proxy.setXrayProxyFragment(fragment);
-			proxy.setXrayProxyEnabled(true);
-			proxy.connectionTypeChangesNotify();
-			Core::App().saveSettingsDelayed();
+			saveSettings(link, fragment);
 			box->closeBox();
+		};
+		const auto test = [=] {
+			Core::App().settings().proxy().setXrayProxyBinaryPath(
+				binaryPath->getLastText().trimmed());
+			const auto result = Core::XrayProxy::TestConfig(
+				field->getLastText().trimmed(),
+				*chosenMode,
+				collectFragment());
+			box->uiShow()->showBox(Ui::MakeInformBox(result.success
+				? tr::lng_xray_proxy_config_test_ok(tr::now)
+				: result.error));
+		};
+		const auto restart = [=] {
+			const auto result = Core::XrayProxy::Restart();
+			box->uiShow()->showBox(Ui::MakeInformBox(result.success
+				? tr::lng_xray_proxy_restart_ok(tr::now)
+				: result.error));
 		};
 		field->submits(
 		) | rpl::on_next(save, field->lifetime());
 		box->addButton(tr::lng_xray_proxy_connect(), save);
+		box->addButton(tr::lng_xray_proxy_test(), test);
+		box->addButton(tr::lng_xray_proxy_restart(), restart);
+		box->addButton(tr::lng_xray_proxy_open_log(), [=] {
+			const auto text = Core::XrayProxy::RecentLogText();
+			box->uiShow()->showBox(Ui::MakeInformBox(text.isEmpty()
+				? tr::lng_xray_proxy_log_empty(tr::now)
+				: text));
+		});
 		box->addButton(tr::lng_cancel(), [=] {
 			box->closeBox();
+		});
+		box->addLeftButton(tr::lng_xray_proxy_choose_binary(), [=] {
+#ifdef Q_OS_WIN
+			const auto filter = u"Xray (xray.exe);;"_q
+				+ FileDialog::AllFilesFilter();
+#else // Q_OS_WIN
+			const auto filter = FileDialog::AllFilesFilter();
+#endif // Q_OS_WIN
+			FileDialog::GetOpenPath(
+				Core::App().getFileDialogParent(),
+				tr::lng_xray_proxy_choose_binary(tr::now),
+				filter,
+				[=](FileDialog::OpenResult &&result) {
+					if (!result.paths.isEmpty()) {
+						binaryPath->setText(result.paths.front());
+					}
+				});
+		});
+		box->addLeftButton(tr::lng_xray_proxy_load_profile(), [=] {
+			const auto name = profileName->getLastText().trimmed();
+			const auto &profiles = Core::App().settings().proxy(
+			).xrayProxyProfiles();
+			const auto i = ranges::find_if(
+				profiles,
+				[&](const Core::XrayProxyProfile &profile) {
+					return profile.name == name;
+				});
+			if (i == end(profiles)) {
+				box->uiShow()->showBox(Ui::MakeInformBox(
+					tr::lng_xray_proxy_profile_missing(tr::now)));
+				return;
+			}
+			field->setText(i->link);
+			modeGroup->setValue(i->mode);
+			*chosenMode = i->mode;
+			fragmentEnabled->setChecked(i->fragment.enabled);
+			packets->setText(i->fragment.packets);
+			length->setText(i->fragment.length);
+			interval->setText(i->fragment.interval);
+		});
+		box->addLeftButton(tr::lng_xray_proxy_ping(), [=] {
+			const auto latency = Core::XrayProxy::TestLatency();
+			box->uiShow()->showBox(Ui::MakeInformBox(latency >= 0
+				? tr::lng_xray_proxy_ping_result(
+					tr::now,
+					lt_count,
+					latency)
+				: tr::lng_xray_proxy_ping_failed(tr::now)));
+		});
+		box->addLeftButton(tr::lng_xray_proxy_update(), [=] {
+			Core::XrayProxy::OpenLatestRelease();
 		});
 		box->addLeftButton(tr::lng_xray_proxy_disable(), [=] {
 			Core::XrayProxy::Stop();

@@ -27,6 +27,13 @@ struct XrayProxyFragmentSettings {
 	QString interval;
 };
 
+struct XrayProxyProfile {
+	QString name;
+	QString link;
+	XrayProxyMode mode = XrayProxyMode::Proxy;
+	XrayProxyFragmentSettings fragment;
+};
+
 class SettingsProxy final {
 public:
 	static constexpr auto kProxyRotationTimeouts = std::array{
@@ -69,6 +76,16 @@ public:
 	[[nodiscard]] XrayProxyFragmentSettings xrayProxyFragment() const;
 	void setXrayProxyFragment(XrayProxyFragmentSettings value);
 
+	[[nodiscard]] QString xrayProxyBinaryPath() const;
+	void setXrayProxyBinaryPath(QString value);
+
+	[[nodiscard]] int xrayProxyProfileIndex() const;
+	void setXrayProxyProfileIndex(int value);
+
+	[[nodiscard]] const std::vector<XrayProxyProfile> &xrayProxyProfiles() const;
+	void setXrayProxyProfiles(std::vector<XrayProxyProfile> value);
+	void upsertXrayProxyProfile(XrayProxyProfile value);
+
 	[[nodiscard]] int proxyRotationTimeout() const;
 	void setProxyRotationTimeout(int value);
 
@@ -109,6 +126,9 @@ private:
 	XrayProxyMode _xrayProxyMode = XrayProxyMode::Proxy;
 	XrayProxyFragmentSettings _xrayProxyFragment;
 	QString _xrayProxyLink;
+	QString _xrayProxyBinaryPath;
+	int _xrayProxyProfileIndex = -1;
+	std::vector<XrayProxyProfile> _xrayProxyProfiles;
 	MTP::ProxyData::Settings _settings = MTP::ProxyData::Settings::System;
 	MTP::ProxyData _selected;
 	std::vector<MTP::ProxyData> _list;
