@@ -348,7 +348,7 @@ void ShowXrayProxyBox(not_null<Window::SessionController*> controller) {
 			box->uiShow()->showBox(Ui::MakeInformBox(latency >= 0
 				? tr::lng_xray_proxy_ping_result(
 					tr::now,
-					lt_latency,
+					lt_ping,
 					latency)
 				: tr::lng_xray_proxy_ping_failed(tr::now)));
 		});

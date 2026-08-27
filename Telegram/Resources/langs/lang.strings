@@ -1345,7 +1345,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_xray_proxy_load_profile" = "Load profile";
 "lng_xray_proxy_profile_missing" = "No Xray profile with this name.";
 "lng_xray_proxy_ping" = "Ping";
-"lng_xray_proxy_ping_result" = "Local Xray proxy responded in {latency} ms.";
+"lng_xray_proxy_ping_result" = "Local Xray proxy responded in {ping} ms.";
 "lng_xray_proxy_ping_failed" = "Xray local proxy is not running or did not respond.";
 "lng_xray_proxy_update" = "Update Xray";
 "lng_xray_proxy_disable" = "Disable";
