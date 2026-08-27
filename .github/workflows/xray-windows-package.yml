@@ -70,12 +70,33 @@ jobs:
         run: |
           $version = '2.0.250303.1'
           $packages = Join-Path $env:TBUILD 'ThirdParty\NuGet'
-          nuget install Microsoft.Windows.CppWinRT `
-            -Version $version `
-            -OutputDirectory $packages `
-            -NonInteractive `
-            -DirectDownload
-          $include = Join-Path $packages "Microsoft.Windows.CppWinRT.$version\build\native\include"
+          $package = Join-Path $packages "Microsoft.Windows.CppWinRT.$version"
+          $nupkg = Join-Path $env:RUNNER_TEMP "Microsoft.Windows.CppWinRT.$version.zip"
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://www.nuget.org/api/v2/package/Microsoft.Windows.CppWinRT/$version" `
+            -OutFile $nupkg
+          Expand-Archive -LiteralPath $nupkg -DestinationPath $package -Force
+          $cppwinrt = Join-Path $package 'bin\cppwinrt.exe'
+          if (-not (Test-Path $cppwinrt -PathType Leaf)) {
+            throw "cppwinrt.exe was not found: $cppwinrt"
+          }
+          $sdkVersion = $env:WindowsSDKVersion.TrimEnd('\')
+          $metadata = Join-Path $env:WindowsSdkDir "UnionMetadata\$sdkVersion\Windows.winmd"
+          if (-not (Test-Path $metadata -PathType Leaf)) {
+            $metadata = Get-ChildItem `
+              -LiteralPath (Join-Path $env:WindowsSdkDir 'UnionMetadata') `
+              -Recurse `
+              -Filter Windows.winmd |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $metadata -or -not (Test-Path $metadata -PathType Leaf)) {
+            throw "Windows.winmd was not found in Windows SDK: $env:WindowsSdkDir"
+          }
+          $include = Join-Path $package 'generated'
+          & $cppwinrt -input $metadata -output $include
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path (Join-Path $include 'winrt\base.h') -PathType Leaf)) {
             throw "C++/WinRT include path was not found: $include"
           }
