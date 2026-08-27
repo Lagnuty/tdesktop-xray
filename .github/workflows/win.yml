@@ -128,20 +128,24 @@ jobs:
           sdk: ${{ env.SDK }}
           toolset: ${{ case(matrix.arch == 'arm64', '', '14.44') }}
 
-      - name: Match C++ WinRT marker to Qt.
+      - name: Match C++ WinRT headers to Qt.
         if: matrix.qt == 'qt6'
         shell: pwsh
         run: |
-          $base = Join-Path $env:WindowsSdkDir "Include\$($env:WindowsSDKVersion)cppwinrt\winrt\base.h"
-          if (-not (Test-Path $base)) {
-            throw "C++/WinRT base.h was not found at $base"
+          $include = Join-Path $env:WindowsSdkDir "Include\$($env:WindowsSDKVersion)cppwinrt\winrt"
+          if (-not (Test-Path $include)) {
+            throw "C++/WinRT include path was not found at $include"
           }
-          $text = Get-Content -LiteralPath $base -Raw
-          $updated = $text -replace '#define CPPWINRT_VERSION "[^"]+"', '#define CPPWINRT_VERSION "2.0.250303.5"'
-          if (($updated -eq $text) -and ($text -notmatch '#define CPPWINRT_VERSION "2\.0\.250303\.5"')) {
-            throw "C++/WinRT version marker was not found in $base"
+          $updatedFiles = 0
+          Get-ChildItem -LiteralPath $include -Recurse -Filter '*.h' | ForEach-Object {
+            $text = Get-Content -LiteralPath $_.FullName -Raw
+            $updated = $text -replace '2\.0\.250303\.1', '2.0.250303.5'
+            if ($updated -ne $text) {
+              Set-Content -LiteralPath $_.FullName -Value $updated -NoNewline
+              $updatedFiles++
+            }
           }
-          Set-Content -LiteralPath $base -Value $updated -NoNewline
+          Write-Output "Updated $updatedFiles C++/WinRT header files."
 
       - name: NuGet sources.
         run: |
