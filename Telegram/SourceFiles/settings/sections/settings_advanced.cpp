@@ -349,7 +349,7 @@ void ShowXrayProxyBox(not_null<Window::SessionController*> controller) {
 				? tr::lng_xray_proxy_ping_result(
 					tr::now,
 					lt_ping,
-					latency)
+					QString::number(latency))
 				: tr::lng_xray_proxy_ping_failed(tr::now)));
 		});
 		box->addLeftButton(tr::lng_xray_proxy_update(), [=] {

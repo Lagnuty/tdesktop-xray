@@ -708,7 +708,7 @@ QString RecentLogText(int maxLines) {
 		return QString();
 	}
 	const auto lines = QString::fromUtf8(file.readAll()).split('\n');
-	const auto from = std::max(0, lines.size() - maxLines);
+	const auto from = std::max(0, int(lines.size()) - maxLines);
 	return lines.mid(from).join('\n').trimmed();
 }
 
