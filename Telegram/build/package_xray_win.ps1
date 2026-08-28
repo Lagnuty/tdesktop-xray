@@ -38,7 +38,7 @@ $telegramExe = Join-Path $ReleasePath "Telegram.exe"
 $updaterExe = Join-Path $ReleasePath "Updater.exe"
 $xrayExe = Resolve-Path $XrayPath
 
-foreach ($path in @($telegramExe, $updaterExe, $xrayExe.Path)) {
+foreach ($path in @($telegramExe, $xrayExe.Path)) {
     if (-not (Test-Path $path -PathType Leaf)) {
         throw "Required file not found: $path"
     }
@@ -58,7 +58,9 @@ New-Item -ItemType Directory -Path $outputFull | Out-Null
 $staging = Join-Path $outputFull "Telegram"
 New-Item -ItemType Directory -Path $staging | Out-Null
 Copy-Item -LiteralPath $telegramExe -Destination $staging
-Copy-Item -LiteralPath $updaterExe -Destination $staging
+if (Test-Path $updaterExe -PathType Leaf) {
+    Copy-Item -LiteralPath $updaterExe -Destination $staging
+}
 Copy-Item -LiteralPath $xrayExe.Path -Destination (Join-Path $staging "xray.exe")
 
 if ($BuildTarget -eq "win64") {

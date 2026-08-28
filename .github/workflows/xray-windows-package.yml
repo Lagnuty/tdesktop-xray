@@ -233,7 +233,7 @@ jobs:
           body: |
             Telegram Desktop Xray build.
 
-            Assets include Telegram Desktop, Updater.exe, and xray.exe.
+            Assets include Telegram Desktop and xray.exe.
             Use the installer for a normal install or the portable zip for a separate portable copy.
           files: |
             ${{ env.TBUILD }}\${{ env.REPO_NAME }}\out\Debug\xray-package\*.zip

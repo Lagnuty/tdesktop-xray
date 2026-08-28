@@ -74,7 +74,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "{#ReleasePath}\Telegram.exe"; DestDir: "{app}"; Flags: ignoreversion
+#if FileExists(ReleasePath + "\Updater.exe")
 Source: "{#ReleasePath}\Updater.exe"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 Source: "{#ReleasePath}\xray.exe"; DestDir: "{app}"; Flags: ignoreversion
 #if MyBuildTarget != "winarm"
   #if FileExists(D3DCompilerPath)

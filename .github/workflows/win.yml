@@ -303,7 +303,7 @@ jobs:
           set OUT=%TBUILD%\%REPO_NAME%\out\Debug
           mkdir artifact
           move %OUT%\Telegram.exe artifact/
-          move %OUT%\Updater.exe artifact/
+          if exist %OUT%\Updater.exe move %OUT%\Updater.exe artifact/
           if exist %OUT%\xray.exe move %OUT%\xray.exe artifact/
           copy %TBUILD%\%REPO_NAME%\Telegram\build\run_xray_with_user_settings.cmd "artifact\Telegram Xray.cmd"
       - uses: actions/upload-artifact@v7
