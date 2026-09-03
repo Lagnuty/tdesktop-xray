@@ -77,6 +77,7 @@ private:
 	void setupMenu();
 	void updateControlsGeometry();
 	void updateInnerControlsGeometry();
+	void updateFooterGeometry();
 	void initResetScaleButton();
 	void toggleAccounts();
 	void chooseEmojiStatus();

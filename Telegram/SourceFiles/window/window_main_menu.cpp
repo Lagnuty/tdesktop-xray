@@ -370,16 +370,7 @@ MainMenu::MainMenu(
 
 	_footer->heightValue(
 	) | rpl::on_next([=] {
-		_telegram->moveToLeft(
-			st::mainMenuFooterLeft,
-			_footer->height()
-				- st::mainMenuTelegramBottom
-				- _telegram->height());
-		_version->moveToLeft(
-			st::mainMenuFooterLeft,
-			_footer->height()
-				- st::mainMenuVersionBottom
-				- _version->height());
+		updateFooterGeometry();
 	}, _footer->lifetime());
 
 	rpl::combine(
@@ -416,6 +407,7 @@ MainMenu::MainMenu(
 		std::make_shared<LambdaClickHandler>([=] {
 			controller->show(Box(AboutBox));
 		}));
+	updateFooterGeometry();
 
 	rpl::combine(
 		_toggleAccounts->rightSkipValue(),
@@ -833,6 +825,21 @@ void MainMenu::updateInnerControlsGeometry() {
 	if (_footer->height() != footerHeight) {
 		_footer->resize(_footer->width(), footerHeight);
 	}
+	updateFooterGeometry();
+}
+
+void MainMenu::updateFooterGeometry() {
+	const auto labelWidth = std::max(width() - st::mainMenuFooterLeft, 0);
+	_telegram->resizeToWidth(labelWidth);
+	_version->resizeToWidth(labelWidth);
+
+	const auto versionTop = _footer->height()
+		- st::mainMenuVersionBottom
+		- _version->height();
+	_version->moveToLeft(st::mainMenuFooterLeft, versionTop);
+	_telegram->moveToLeft(
+		st::mainMenuFooterLeft,
+		versionTop - st::mainMenuSkip - _telegram->height());
 }
 
 void MainMenu::chooseEmojiStatus() {
