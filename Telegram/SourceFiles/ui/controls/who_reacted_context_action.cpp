@@ -1331,30 +1331,14 @@ void WhoReactedListMenu::applyScrollBarSkip(not_null<PopupMenu*> menu) {
 		if (!_moderateReactionChosen) {
 			return 0;
 		}
-		const auto content = menu->menu()->height();
-		if constexpr (std::is_same_v<Menu, PopupMenu>) {
-			const auto &menuSt = menu->st();
-			const auto paddedContent = content
-				+ menuSt.scrollPadding.top()
-				+ menuSt.scrollPadding.bottom();
-			// style::PopupMenu has no scroll field, PopupMenu hardcodes it.
-			return (paddedContent > menu->inner().height())
-				? st::defaultMultiSelect.scroll.width
-				: 0;
-		} else {
-			const auto &menuSt = st::whoReadDropdownMenu.wrap;
-			const auto paddedContent = content
-				+ menuSt.scrollPadding.top()
-				+ menuSt.scrollPadding.bottom();
-			const auto viewport = menu->height()
-				- menuSt.padding.top()
-				- menuSt.padding.bottom()
-				- menuSt.scrollMargin.top()
-				- menuSt.scrollMargin.bottom();
-			return (paddedContent > viewport)
-				? menuSt.scroll.width
-				: 0;
-		}
+		const auto &menuSt = menu->st();
+		const auto content = menu->menu()->height()
+			+ menuSt.scrollPadding.top()
+			+ menuSt.scrollPadding.bottom();
+		// style::PopupMenu has no scroll field, PopupMenu hardcodes it.
+		return (content > menu->inner().height())
+			? st::defaultMultiSelect.scroll.width
+			: 0;
 	}();
 	_minimalWidth = 0;
 	for (const auto &action : _actions) {
