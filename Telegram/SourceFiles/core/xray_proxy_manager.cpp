@@ -607,7 +607,9 @@ StartResult TestConfig(
 		return { false, tr::lng_xray_proxy_missing_binary(tr::now), 0 };
 	}
 	const auto reservation = ReservePort();
-	const auto port = reservation ? reservation->serverPort() : 0;
+	const auto port = reservation
+		? uint32(reservation->serverPort())
+		: uint32(0);
 	if (!port) {
 		return { false, tr::lng_xray_proxy_port_failed(tr::now), 0 };
 	}
@@ -678,7 +680,9 @@ StartResult Start(
 		return test;
 	}
 	const auto reservation = ReservePort();
-	const auto port = reservation ? reservation->serverPort() : 0;
+	const auto port = reservation
+		? uint32(reservation->serverPort())
+		: uint32(0);
 	if (!port) {
 		return { false, tr::lng_xray_proxy_port_failed(tr::now), 0 };
 	}
