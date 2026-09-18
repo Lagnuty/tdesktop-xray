@@ -31,7 +31,8 @@ public:
 	SpecialConfigRequest(
 		Fn<void()> timeDoneCallback,
 		bool isTestMode,
-		const QString &domainString);
+		const QString &domainString,
+		bool useGlobalProxy = false);
 
 private:
 	enum class Type {
@@ -56,7 +57,8 @@ private:
 		Fn<void()> timeDoneCallback,
 		bool isTestMode,
 		const QString &domainString,
-		const QString &phone);
+		const QString &phone,
+		bool useGlobalProxy);
 
 	void sendNextRequest();
 	void performRequest(const Attempt &attempt);

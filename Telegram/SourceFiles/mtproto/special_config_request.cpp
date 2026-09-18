@@ -191,14 +191,17 @@ SpecialConfigRequest::SpecialConfigRequest(
 	Fn<void()> timeDoneCallback,
 	bool isTestMode,
 	const QString &domainString,
-	const QString &phone)
+	const QString &phone,
+	bool useGlobalProxy)
 : _callback(std::move(callback))
 , _timeDoneCallback(std::move(timeDoneCallback))
 , _domainString(domainString)
 , _phone(phone) {
 	Expects((_callback == nullptr) != (_timeDoneCallback == nullptr));
 
-	_manager.setProxy(QNetworkProxy::NoProxy);
+	if (!useGlobalProxy) {
+		_manager.setProxy(QNetworkProxy::NoProxy);
+	}
 
 	std::random_device rd;
 	const auto shuffle = [&](int from, int till) {
@@ -250,19 +253,22 @@ SpecialConfigRequest::SpecialConfigRequest(
 	nullptr,
 	isTestMode,
 	domainString,
-	phone) {
+	phone,
+	false) {
 }
 
 SpecialConfigRequest::SpecialConfigRequest(
 	Fn<void()> timeDoneCallback,
 	bool isTestMode,
-	const QString &domainString)
+	const QString &domainString,
+	bool useGlobalProxy)
 : SpecialConfigRequest(
 	nullptr,
 	std::move(timeDoneCallback),
 	isTestMode,
 	domainString,
-	QString()) {
+	QString(),
+	useGlobalProxy) {
 }
 
 void SpecialConfigRequest::sendNextRequest() {

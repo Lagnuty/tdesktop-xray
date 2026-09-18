@@ -108,12 +108,12 @@ struct State {
 	return match.hasMatch() ? match.captured(1) : QString();
 }
 
-[[nodiscard]] uint32 AllocatePort() {
-	auto server = QTcpServer();
-	if (!server.listen(QHostAddress::LocalHost, 0)) {
-		return 0;
+[[nodiscard]] std::unique_ptr<QTcpServer> ReservePort() {
+	auto result = std::make_unique<QTcpServer>();
+	if (!result->listen(QHostAddress::LocalHost, 0)) {
+		return nullptr;
 	}
-	return server.serverPort();
+	return result;
 }
 
 [[nodiscard]] bool IsNumberRange(const QString &text, bool allowZero) {
@@ -236,6 +236,19 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 			{ u"sockopt"_q, QJsonObject{
 				{ u"tcpNoDelay"_q, true },
 			} },
+		} },
+	};
+}
+
+[[nodiscard]] QJsonObject SocksInbound(uint32 port) {
+	return {
+		{ u"tag"_q, u"telegram-socks-in"_q },
+		{ u"listen"_q, QString::fromLatin1(kLoopbackHost) },
+		{ u"port"_q, int(port) },
+		{ u"protocol"_q, u"socks"_q },
+		{ u"settings"_q, QJsonObject{
+			{ u"auth"_q, u"noauth"_q },
+			{ u"udp"_q, true },
 		} },
 	};
 }
@@ -410,8 +423,9 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 	if (fragment.enabled) {
 		outbounds.append(FragmentOutbound(fragment));
 	}
-	const auto inbound = (mode == XrayProxyMode::Vpn)
-		? QJsonObject{
+	auto inbounds = QJsonArray{ SocksInbound(port) };
+	if (mode == XrayProxyMode::Vpn) {
+		inbounds.append(QJsonObject{
 			{ u"tag"_q, u"telegram-tun-in"_q },
 			{ u"port"_q, 0 },
 			{ u"protocol"_q, u"tun"_q },
@@ -419,24 +433,15 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 				{ u"name"_q, u"telegram-xray"_q },
 				{ u"MTU"_q, 1500 },
 			} },
-		}
-		: QJsonObject{
-			{ u"tag"_q, u"telegram-socks-in"_q },
-			{ u"listen"_q, QString::fromLatin1(kLoopbackHost) },
-			{ u"port"_q, int(port) },
-			{ u"protocol"_q, u"socks"_q },
-			{ u"settings"_q, QJsonObject{
-				{ u"auth"_q, u"noauth"_q },
-				{ u"udp"_q, false },
-			} },
-		};
+		});
+	}
 	const auto config = QJsonObject{
 		{ u"log"_q, QJsonObject{
 			{ u"access"_q, LogPath() },
 			{ u"error"_q, LogPath() },
 			{ u"loglevel"_q, u"warning"_q },
 		} },
-		{ u"inbounds"_q, QJsonArray{ inbound } },
+		{ u"inbounds"_q, inbounds },
 		{ u"outbounds"_q, outbounds },
 	};
 	return QJsonDocument(config).toJson(QJsonDocument::Indented);
@@ -476,6 +481,34 @@ void ApplyLocalProxy(uint32 port) {
 		.host = QString::fromLatin1(kLoopbackHost),
 		.port = port,
 	}, MTP::ProxyData::Settings::Enabled);
+}
+
+[[nodiscard]] bool SocksReady(QProcess &process, uint32 port) {
+	auto timer = QElapsedTimer();
+	timer.start();
+	while (timer.elapsed() < 5000) {
+		if (process.waitForFinished(50)) {
+			return false;
+		}
+		auto socket = QTcpSocket();
+		socket.setProxy(QNetworkProxy::NoProxy);
+		socket.connectToHost(QHostAddress::LocalHost, port);
+		if (!socket.waitForConnected(200)) {
+			continue;
+		}
+		socket.write("\x05\x01\x00", 3);
+		if (!socket.waitForBytesWritten(200)
+			|| !socket.waitForReadyRead(200)) {
+			continue;
+		}
+		const auto response = socket.read(2);
+		if (response.size() == 2
+			&& uchar(response[0]) == 5
+			&& uchar(response[1]) == 0) {
+			return true;
+		}
+	}
+	return false;
 }
 
 } // namespace
@@ -573,14 +606,16 @@ StartResult TestConfig(
 	if (xray.isEmpty() || !QFile::exists(xray)) {
 		return { false, tr::lng_xray_proxy_missing_binary(tr::now), 0 };
 	}
-	const auto port = (mode == XrayProxyMode::Proxy) ? AllocatePort() : 0;
-	if (mode == XrayProxyMode::Proxy && !port) {
+	const auto reservation = ReservePort();
+	const auto port = reservation ? reservation->serverPort() : 0;
+	if (!port) {
 		return { false, tr::lng_xray_proxy_port_failed(tr::now), 0 };
 	}
 	const auto config = BuildConfig(link, port, mode, fragment);
 	if (!config || !WriteConfig(*config, TestConfigPath())) {
 		return { false, tr::lng_xray_proxy_config_failed(tr::now), 0 };
 	}
+	reservation->close();
 	auto process = QProcess();
 	process.setProgram(xray);
 	process.setArguments({
@@ -632,24 +667,34 @@ StartResult Start(
 	}
 	auto &state = GlobalState();
 	if (state.process
+		&& state.process->state() != QProcess::NotRunning
 		&& state.link == link
 		&& state.mode == mode
 		&& IsSameFragment(state.fragment, fragment)) {
 		return { true, QString(), state.port };
 	}
-	Stop();
-	const auto port = (mode == XrayProxyMode::Proxy) ? AllocatePort() : 0;
-	if (mode == XrayProxyMode::Proxy && !port) {
+	const auto test = TestConfig(link, mode, fragment);
+	if (!test.success) {
+		return test;
+	}
+	const auto reservation = ReservePort();
+	const auto port = reservation ? reservation->serverPort() : 0;
+	if (!port) {
 		return { false, tr::lng_xray_proxy_port_failed(tr::now), 0 };
 	}
 	const auto config = BuildConfig(link, port, mode, fragment);
 	if (!config || !WriteConfig(*config)) {
 		return { false, tr::lng_xray_proxy_config_failed(tr::now), 0 };
 	}
-	const auto test = TestConfig(link, mode, fragment);
-	if (!test.success) {
-		return test;
-	}
+	const auto &settings = Core::App().settings().proxy();
+	const auto restoreOnFailure = !settings.xrayProxyEnabled();
+	const auto previousProxy = settings.selected();
+	const auto previousSettings = settings.settings();
+	const auto previousCalls = settings.useProxyForCalls();
+	ApplyLocalProxy(port);
+	Core::App().settings().proxy().setUseProxyForCalls(true);
+	Stop();
+	reservation->close();
 	auto process = std::make_unique<QProcess>();
 	process->setProgram(xray);
 	process->setArguments({ u"run"_q, u"-config"_q, ConfigPath() });
@@ -657,13 +702,16 @@ StartResult Start(
 	process->setStandardOutputFile(LogPath(), QIODevice::Append);
 	process->setStandardErrorFile(LogPath(), QIODevice::Append);
 	process->start();
-	if (!process->waitForStarted(5000)) {
-		return { false, tr::lng_xray_proxy_start_failed(tr::now), 0 };
-	}
-	if (process->waitForFinished(300)) {
+	if (!process->waitForStarted(5000) || !SocksReady(*process, port)) {
 		AppendLog(QString::fromUtf8(
 			process->readAllStandardOutput()
 				+ process->readAllStandardError()));
+		process->kill();
+		process->waitForFinished(1000);
+		if (restoreOnFailure) {
+			Core::App().settings().proxy().setUseProxyForCalls(previousCalls);
+			Core::App().setCurrentProxy(previousProxy, previousSettings);
+		}
 		return { false, tr::lng_xray_proxy_start_failed(tr::now), 0 };
 	}
 	state.process = std::move(process);
@@ -671,14 +719,6 @@ StartResult Start(
 	state.link = link;
 	state.mode = mode;
 	state.fragment = fragment;
-	if (mode == XrayProxyMode::Proxy) {
-		ApplyLocalProxy(port);
-	} else {
-		auto &proxy = Core::App().settings().proxy();
-		Core::App().setCurrentProxy(
-			proxy.selected(),
-			MTP::ProxyData::Settings::System);
-	}
 	return { true, QString(), port };
 }
 
@@ -718,13 +758,10 @@ int TestLatency() {
 		return -1;
 	}
 	auto timer = QElapsedTimer();
-	auto socket = QTcpSocket();
 	timer.start();
-	socket.connectToHost(QHostAddress::LocalHost, state.port);
-	if (!socket.waitForConnected(3000)) {
+	if (!SocksReady(*state.process, state.port)) {
 		return -1;
 	}
-	socket.disconnectFromHost();
 	return int(timer.elapsed());
 }
 

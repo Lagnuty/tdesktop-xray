@@ -549,7 +549,10 @@ void Instance::Private::syncHttpUnixtime() {
 		InvokeQueued(_instance, [=] {
 			_httpUnixtimeLoader = nullptr;
 		});
-	}, isTestMode(), configValues().txtDomainString);
+	},
+		isTestMode(),
+		configValues().txtDomainString,
+		_proxySettings.isEnabled());
 }
 
 void Instance::Private::restartedByTimeout(ShiftedDcId shiftedDcId) {
