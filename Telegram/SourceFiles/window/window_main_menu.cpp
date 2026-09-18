@@ -342,7 +342,9 @@ MainMenu::MainMenu(
 , _footer(_inner->add(object_ptr<Ui::RpWidget>(_inner.get())))
 , _telegram(
 	Ui::CreateChild<Ui::FlatLabel>(_footer.get(), st::mainMenuTelegramLabel))
-, _version(AddVersionLabel(_footer)) {
+, _version(AddVersionLabel(_footer))
+, _xrayVersion(
+	Ui::CreateChild<Ui::FlatLabel>(_footer.get(), st::mainMenuVersionLabel)) {
 	setAttribute(Qt::WA_OpaquePaintEvent);
 
 	setupUserpicButton();
@@ -400,9 +402,8 @@ MainMenu::MainMenu(
 		.append(QChar(' '))
 		.append(QChar(8211))
 		.append(QChar(' '))
-		.append(tr::link(tr::lng_menu_about(tr::now), 2)) // Link 2.
-		.append('\n')
-		.append(Core::XrayProxy::VersionText()));
+		.append(tr::link(tr::lng_menu_about(tr::now), 2))); // Link 2.
+	_xrayVersion->setText(Core::XrayProxy::VersionText());
 	_version->setLink(
 		1,
 		std::make_shared<UrlClickHandler>(Core::App().changelogLink()));
@@ -818,14 +819,24 @@ void MainMenu::updateControlsGeometry() {
 }
 
 void MainMenu::updateInnerControlsGeometry() {
+	updateFooterGeometry();
 	const auto contentHeight = _accounts->height()
 		+ _shadow->height()
 		+ st::mainMenuSkip
 		+ _menu->height();
 	const auto available = height() - st::mainMenuCoverHeight - contentHeight;
-	const auto footerHeight = std::max(
+	const auto labelsHeight = st::mainMenuVersionBottom
+		+ _xrayVersion->height()
+		+ st::mainMenuSkip
+		+ _version->height()
+		+ st::mainMenuSkip
+		+ _telegram->height()
+		+ st::mainMenuSkip;
+	const auto footerHeight = std::max({
 		available,
-		st::mainMenuFooterHeightMin);
+		st::mainMenuFooterHeightMin,
+		labelsHeight,
+	});
 	if (_footer->height() != footerHeight) {
 		_footer->resize(_footer->width(), footerHeight);
 	}
@@ -836,9 +847,14 @@ void MainMenu::updateFooterGeometry() {
 	const auto labelWidth = std::max(width() - st::mainMenuFooterLeft, 0);
 	_telegram->resizeToWidth(labelWidth);
 	_version->resizeToWidth(labelWidth);
+	_xrayVersion->resizeToWidth(labelWidth);
 
-	const auto versionTop = _footer->height()
+	const auto xrayVersionTop = _footer->height()
 		- st::mainMenuVersionBottom
+		- _xrayVersion->height();
+	_xrayVersion->moveToLeft(st::mainMenuFooterLeft, xrayVersionTop);
+	const auto versionTop = xrayVersionTop
+		- st::mainMenuSkip
 		- _version->height();
 	_version->moveToLeft(st::mainMenuFooterLeft, versionTop);
 	_telegram->moveToLeft(
