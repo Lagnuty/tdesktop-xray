@@ -31,6 +31,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <algorithm>
 #include <optional>
 
+#ifdef Q_OS_WIN
+#include <shellapi.h>
+#include <windows.h>
+#endif // Q_OS_WIN
+
 namespace Core::XrayProxy {
 namespace {
 
@@ -46,6 +51,9 @@ constexpr auto kLoopbackHost = "127.0.0.1";
 
 struct State {
 	std::unique_ptr<QProcess> process;
+#ifdef Q_OS_WIN
+	HANDLE elevatedProcess = nullptr;
+#endif // Q_OS_WIN
 	uint32 port = 0;
 	QString link;
 	XrayProxyMode mode = XrayProxyMode::Proxy;
@@ -240,6 +248,19 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 	};
 }
 
+[[nodiscard]] bool IsRunning(const State &state) {
+	if (state.process
+		&& state.process->state() != QProcess::NotRunning) {
+		return true;
+	}
+#ifdef Q_OS_WIN
+	return state.elevatedProcess
+		&& WaitForSingleObject(state.elevatedProcess, 0) == WAIT_TIMEOUT;
+#else // Q_OS_WIN
+	return false;
+#endif // Q_OS_WIN
+}
+
 [[nodiscard]] QJsonObject SocksInbound(uint32 port) {
 	return {
 		{ u"tag"_q, u"telegram-socks-in"_q },
@@ -302,14 +323,46 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 }
 
 [[nodiscard]] QJsonObject Hysteria2Outbound(const QUrl &url) {
+	const auto query = QUrlQuery(url);
+	auto tls = QJsonObject();
+	const auto sni = query.queryItemValue(u"sni"_q);
+	const auto fingerprint = query.queryItemValue(u"fp"_q);
+	const auto alpn = query.queryItemValue(u"alpn"_q)
+		.split(',', Qt::SkipEmptyParts);
+	const auto ech = query.queryItemValue(u"ech"_q);
+	const auto insecure = query.queryItemValue(u"insecure"_q);
+	if (!sni.isEmpty()) {
+		tls.insert(u"serverName"_q, sni);
+	}
+	if (!fingerprint.isEmpty()) {
+		tls.insert(u"fingerprint"_q, fingerprint);
+	}
+	if (!alpn.isEmpty()) {
+		tls.insert(u"alpn"_q, QJsonArray::fromStringList(alpn));
+	}
+	if (!ech.isEmpty()) {
+		tls.insert(u"echConfigList"_q, ech);
+		tls.insert(u"minVersion"_q, u"1.3"_q);
+		tls.insert(u"maxVersion"_q, u"1.3"_q);
+	}
+	if (insecure == u"1"_q || insecure == u"true"_q) {
+		tls.insert(u"allowInsecure"_q, true);
+	}
 	return {
-		{ u"protocol"_q, u"hysteria2"_q },
+		{ u"protocol"_q, u"hysteria"_q },
 		{ u"settings"_q, QJsonObject{
-			{ u"servers"_q, QJsonArray{ QJsonObject{
-				{ u"address"_q, url.host() },
-				{ u"port"_q, url.port(443) },
-				{ u"password"_q, url.userName() },
-			} } },
+			{ u"version"_q, 2 },
+			{ u"address"_q, url.host() },
+			{ u"port"_q, url.port(443) },
+		} },
+		{ u"streamSettings"_q, QJsonObject{
+			{ u"network"_q, u"hysteria"_q },
+			{ u"security"_q, u"tls"_q },
+			{ u"tlsSettings"_q, tls },
+			{ u"hysteriaSettings"_q, QJsonObject{
+				{ u"version"_q, 2 },
+				{ u"auth"_q, url.userName() },
+			} },
 		} },
 	};
 }
@@ -431,7 +484,21 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 			{ u"protocol"_q, u"tun"_q },
 			{ u"settings"_q, QJsonObject{
 				{ u"name"_q, u"telegram-xray"_q },
-				{ u"MTU"_q, 1500 },
+				{ u"desc"_q, u"Telegram Xray"_q },
+				{ u"mtu"_q, 1500 },
+				{ u"gateway"_q, QJsonArray{
+					u"10.255.0.1/30"_q,
+					u"fd00:74:67::1/64"_q,
+				} },
+				{ u"dns"_q, QJsonArray{
+					u"1.1.1.1"_q,
+					u"2606:4700:4700::1111"_q,
+				} },
+				{ u"autoSystemRoutingTable"_q, QJsonArray{
+					u"0.0.0.0/0"_q,
+					u"::/0"_q,
+				} },
+				{ u"autoOutboundsInterface"_q, u"auto"_q },
 			} },
 		});
 	}
@@ -511,6 +578,54 @@ void ApplyLocalProxy(uint32 port) {
 	return false;
 }
 
+#ifdef Q_OS_WIN
+[[nodiscard]] HANDLE StartElevated(
+		const QString &program,
+		const QString &configPath) {
+	const auto parameters = u"run -config \"%1\""_q.arg(configPath);
+	const auto directory = QFileInfo(program).absolutePath();
+	auto info = SHELLEXECUTEINFOW{
+		.cbSize = sizeof(SHELLEXECUTEINFOW),
+		.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
+		.hwnd = nullptr,
+		.lpVerb = L"runas",
+		.lpFile = reinterpret_cast<const wchar_t*>(program.utf16()),
+		.lpParameters = reinterpret_cast<const wchar_t*>(parameters.utf16()),
+		.lpDirectory = reinterpret_cast<const wchar_t*>(directory.utf16()),
+		.nShow = SW_HIDE,
+	};
+	return ShellExecuteExW(&info) ? info.hProcess : nullptr;
+}
+
+[[nodiscard]] bool SocksReady(HANDLE process, uint32 port) {
+	auto timer = QElapsedTimer();
+	timer.start();
+	while (timer.elapsed() < 5000) {
+		if (WaitForSingleObject(process, 50) != WAIT_TIMEOUT) {
+			return false;
+		}
+		auto socket = QTcpSocket();
+		socket.setProxy(QNetworkProxy::NoProxy);
+		socket.connectToHost(QHostAddress::LocalHost, port);
+		if (!socket.waitForConnected(200)) {
+			continue;
+		}
+		socket.write("\x05\x01\x00", 3);
+		if (!socket.waitForBytesWritten(200)
+			|| !socket.waitForReadyRead(200)) {
+			continue;
+		}
+		const auto response = socket.read(2);
+		if (response.size() == 2
+			&& uchar(response[0]) == 5
+			&& uchar(response[1]) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+#endif // Q_OS_WIN
+
 } // namespace
 
 bool IsSupportedLink(const QString &link) {
@@ -567,8 +682,7 @@ QString StatusLabel() {
 		return tr::lng_xray_proxy_disabled(tr::now);
 	}
 	const auto &state = GlobalState();
-	return (state.process
-			&& state.process->state() != QProcess::NotRunning)
+	return IsRunning(state)
 		? tr::lng_xray_proxy_active(tr::now)
 		: tr::lng_xray_proxy_configured(tr::now);
 }
@@ -579,8 +693,7 @@ Status CurrentStatus() {
 	return {
 		.supported = PlatformSupported(),
 		.enabled = settings.xrayProxyEnabled(),
-		.running = (state.process
-			&& state.process->state() != QProcess::NotRunning),
+		.running = IsRunning(state),
 		.port = state.port,
 		.binaryPath = XrayPath(),
 		.configPath = ConfigPath(),
@@ -613,7 +726,11 @@ StartResult TestConfig(
 	if (!port) {
 		return { false, tr::lng_xray_proxy_port_failed(tr::now), 0 };
 	}
-	const auto config = BuildConfig(link, port, mode, fragment);
+	const auto config = BuildConfig(
+		link,
+		port,
+		(mode == XrayProxyMode::Vpn) ? XrayProxyMode::Proxy : mode,
+		fragment);
 	if (!config || !WriteConfig(*config, TestConfigPath())) {
 		return { false, tr::lng_xray_proxy_config_failed(tr::now), 0 };
 	}
@@ -668,8 +785,7 @@ StartResult Start(
 		return { false, tr::lng_xray_proxy_missing_binary(tr::now), 0 };
 	}
 	auto &state = GlobalState();
-	if (state.process
-		&& state.process->state() != QProcess::NotRunning
+	if (IsRunning(state)
 		&& state.link == link
 		&& state.mode == mode
 		&& IsSameFragment(state.fragment, fragment)) {
@@ -699,26 +815,48 @@ StartResult Start(
 	Core::App().settings().proxy().setUseProxyForCalls(true);
 	Stop();
 	reservation->close();
-	auto process = std::make_unique<QProcess>();
-	process->setProgram(xray);
-	process->setArguments({ u"run"_q, u"-config"_q, ConfigPath() });
-	process->setWorkingDirectory(QFileInfo(xray).absolutePath());
-	process->setStandardOutputFile(LogPath(), QIODevice::Append);
-	process->setStandardErrorFile(LogPath(), QIODevice::Append);
-	process->start();
-	if (!process->waitForStarted(5000) || !SocksReady(*process, port)) {
-		AppendLog(QString::fromUtf8(
-			process->readAllStandardOutput()
-				+ process->readAllStandardError()));
-		process->kill();
-		process->waitForFinished(1000);
+	auto started = false;
+#ifdef Q_OS_WIN
+	if (mode == XrayProxyMode::Vpn) {
+		state.elevatedProcess = StartElevated(xray, ConfigPath());
+		started = state.elevatedProcess
+			&& SocksReady(state.elevatedProcess, port);
+	} else
+#endif // Q_OS_WIN
+	{
+		auto process = std::make_unique<QProcess>();
+		process->setProgram(xray);
+		process->setArguments({ u"run"_q, u"-config"_q, ConfigPath() });
+		process->setWorkingDirectory(QFileInfo(xray).absolutePath());
+		process->setStandardOutputFile(LogPath(), QIODevice::Append);
+		process->setStandardErrorFile(LogPath(), QIODevice::Append);
+		process->start();
+		started = process->waitForStarted(5000)
+			&& SocksReady(*process, port);
+		if (!started) {
+			AppendLog(QString::fromUtf8(
+				process->readAllStandardOutput()
+					+ process->readAllStandardError()));
+			process->kill();
+			process->waitForFinished(1000);
+		} else {
+			state.process = std::move(process);
+		}
+	}
+	if (!started) {
+#ifdef Q_OS_WIN
+		if (state.elevatedProcess) {
+			TerminateProcess(state.elevatedProcess, 1);
+			CloseHandle(state.elevatedProcess);
+			state.elevatedProcess = nullptr;
+		}
+#endif // Q_OS_WIN
 		if (restoreOnFailure) {
 			Core::App().settings().proxy().setUseProxyForCalls(previousCalls);
 			Core::App().setCurrentProxy(previousProxy, previousSettings);
 		}
 		return { false, tr::lng_xray_proxy_start_failed(tr::now), 0 };
 	}
-	state.process = std::move(process);
 	state.port = port;
 	state.link = link;
 	state.mode = mode;
@@ -758,12 +896,21 @@ QString RecentLogText(int maxLines) {
 
 int TestLatency() {
 	const auto &state = GlobalState();
-	if (!state.process || !state.port) {
+	if (!IsRunning(state) || !state.port) {
 		return -1;
 	}
 	auto timer = QElapsedTimer();
 	timer.start();
-	if (!SocksReady(*state.process, state.port)) {
+	auto ready = false;
+	if (state.process) {
+		ready = SocksReady(*state.process, state.port);
+	}
+#ifdef Q_OS_WIN
+	else if (state.elevatedProcess) {
+		ready = SocksReady(state.elevatedProcess, state.port);
+	}
+#endif // Q_OS_WIN
+	if (!ready) {
 		return -1;
 	}
 	return int(timer.elapsed());
@@ -786,6 +933,13 @@ void Stop() {
 			state.process->waitForFinished(2000);
 		}
 	}
+#ifdef Q_OS_WIN
+	if (state.elevatedProcess) {
+		TerminateProcess(state.elevatedProcess, 0);
+		WaitForSingleObject(state.elevatedProcess, 2000);
+		CloseHandle(state.elevatedProcess);
+	}
+#endif // Q_OS_WIN
 	state = State();
 }
 

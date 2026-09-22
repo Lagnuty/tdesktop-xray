@@ -86,6 +86,7 @@ Source: "{#ReleasePath}\Telegram.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ReleasePath}\Updater.exe"; DestDir: "{app}"; Flags: ignoreversion
 #endif
 Source: "{#ReleasePath}\xray.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#ReleasePath}\wintun.dll"; DestDir: "{app}"; Flags: ignoreversion
 #if MyBuildTarget != "winarm"
   #if FileExists(D3DCompilerPath)
 Source: "{#D3DCompilerPath}"; DestDir: "{app}\{#ModulesFolder}\d3d"; Flags: ignoreversion
@@ -105,6 +106,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 Type: files; Name: "{app}\data"
 Type: files; Name: "{app}\data_config"
 Type: files; Name: "{app}\xray.exe"
+Type: files; Name: "{app}\wintun.dll"
 Type: files; Name: "{app}\log.txt"
 Type: filesandordirs; Name: "{app}\DebugLogs"
 Type: filesandordirs; Name: "{app}\tupdates"
@@ -116,6 +118,7 @@ Type: dirifempty; Name: "{app}"
 Type: files; Name: "{userappdata}\{#MyAppName}\data"
 Type: files; Name: "{userappdata}\{#MyAppName}\data_config"
 Type: files; Name: "{userappdata}\{#MyAppName}\xray.exe"
+Type: files; Name: "{userappdata}\{#MyAppName}\wintun.dll"
 Type: files; Name: "{userappdata}\{#MyAppName}\log.txt"
 Type: filesandordirs; Name: "{userappdata}\{#MyAppName}\DebugLogs"
 Type: filesandordirs; Name: "{userappdata}\{#MyAppName}\tupdates"

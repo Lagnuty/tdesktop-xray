@@ -300,6 +300,7 @@ jobs:
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
           Expand-Archive -LiteralPath $zip -DestinationPath $env:RUNNER_TEMP\xray
           Copy-Item -LiteralPath $env:RUNNER_TEMP\xray\xray.exe -Destination $env:TBUILD\$env:REPO_NAME\out\Debug\xray.exe
+          Copy-Item -LiteralPath $env:RUNNER_TEMP\xray\wintun.dll -Destination $env:TBUILD\$env:REPO_NAME\out\Debug\wintun.dll
 
       - name: Move artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly')
@@ -309,6 +310,7 @@ jobs:
           move %OUT%\Telegram.exe artifact/
           if exist %OUT%\Updater.exe move %OUT%\Updater.exe artifact/
           if exist %OUT%\xray.exe move %OUT%\xray.exe artifact/
+          if exist %OUT%\wintun.dll move %OUT%\wintun.dll artifact/
           copy %TBUILD%\%REPO_NAME%\Telegram\build\run_xray_with_user_settings.cmd "artifact\Telegram Xray.cmd"
       - uses: actions/upload-artifact@v7
         name: Upload artifact.

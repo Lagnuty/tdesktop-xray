@@ -36,9 +36,10 @@ if (-not $XrayPath) {
 
 $telegramExe = Join-Path $ReleasePath "Telegram.exe"
 $updaterExe = Join-Path $ReleasePath "Updater.exe"
+$wintunDll = Join-Path $ReleasePath "wintun.dll"
 $xrayExe = Resolve-Path $XrayPath
 
-foreach ($path in @($telegramExe, $xrayExe.Path)) {
+foreach ($path in @($telegramExe, $xrayExe.Path, $wintunDll)) {
     if (-not (Test-Path $path -PathType Leaf)) {
         throw "Required file not found: $path"
     }
@@ -62,6 +63,7 @@ if (Test-Path $updaterExe -PathType Leaf) {
     Copy-Item -LiteralPath $updaterExe -Destination $staging
 }
 Copy-Item -LiteralPath $xrayExe.Path -Destination (Join-Path $staging "xray.exe")
+Copy-Item -LiteralPath $wintunDll -Destination $staging
 
 if ($BuildTarget -eq "win64") {
     $platform = "x64"
