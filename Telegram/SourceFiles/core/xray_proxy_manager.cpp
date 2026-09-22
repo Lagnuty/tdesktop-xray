@@ -157,6 +157,11 @@ struct State {
 		&& a.interval == b.interval;
 }
 
+[[nodiscard]] bool IsHysteriaLink(const QString &link) {
+	const auto scheme = QUrl(link.trimmed()).scheme().toLower();
+	return scheme == u"hysteria2"_q || scheme == u"hy2"_q;
+}
+
 [[nodiscard]] QJsonObject StreamSettings(const QUrl &url) {
 	const auto query = QUrlQuery(url);
 	auto result = QJsonObject();
@@ -325,12 +330,15 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 [[nodiscard]] QJsonObject Hysteria2Outbound(const QUrl &url) {
 	const auto query = QUrlQuery(url);
 	auto tls = QJsonObject();
-	const auto sni = query.queryItemValue(u"sni"_q);
-	const auto fingerprint = query.queryItemValue(u"fp"_q);
-	const auto alpn = query.queryItemValue(u"alpn"_q)
+	const auto sni = query.queryItemValue(u"sni"_q, QUrl::FullyDecoded);
+	const auto fingerprint = query.queryItemValue(
+		u"fp"_q,
+		QUrl::FullyDecoded);
+	const auto alpn = query.queryItemValue(u"alpn"_q, QUrl::FullyDecoded)
 		.split(',', Qt::SkipEmptyParts);
-	const auto ech = query.queryItemValue(u"ech"_q);
-	const auto insecure = query.queryItemValue(u"insecure"_q);
+	const auto insecure = query.queryItemValue(
+		u"insecure"_q,
+		QUrl::FullyDecoded);
 	if (!sni.isEmpty()) {
 		tls.insert(u"serverName"_q, sni);
 	}
@@ -339,11 +347,6 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 	}
 	if (!alpn.isEmpty()) {
 		tls.insert(u"alpn"_q, QJsonArray::fromStringList(alpn));
-	}
-	if (!ech.isEmpty()) {
-		tls.insert(u"echConfigList"_q, ech);
-		tls.insert(u"minVersion"_q, u"1.3"_q);
-		tls.insert(u"maxVersion"_q, u"1.3"_q);
 	}
 	if (insecure == u"1"_q || insecure == u"true"_q) {
 		tls.insert(u"allowInsecure"_q, true);
@@ -469,15 +472,17 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 	}
 	auto outbounds = QJsonArray();
 	auto proxyOutbound = *outbound;
-	if (fragment.enabled) {
+	const auto fragmentEnabled = fragment.enabled
+		&& !IsHysteriaLink(link);
+	if (fragmentEnabled) {
 		ApplyFragmentDialer(proxyOutbound);
 	}
 	outbounds.append(proxyOutbound);
-	if (fragment.enabled) {
+	if (fragmentEnabled) {
 		outbounds.append(FragmentOutbound(fragment));
 	}
 	auto inbounds = QJsonArray{ SocksInbound(port) };
-	if (mode == XrayProxyMode::Vpn) {
+	if (mode == XrayProxyMode::Vpn && !IsHysteriaLink(link)) {
 		inbounds.append(QJsonObject{
 			{ u"tag"_q, u"telegram-tun-in"_q },
 			{ u"port"_q, 0 },
@@ -817,7 +822,7 @@ StartResult Start(
 	reservation->close();
 	auto started = false;
 #ifdef Q_OS_WIN
-	if (mode == XrayProxyMode::Vpn) {
+	if (mode == XrayProxyMode::Vpn && !IsHysteriaLink(link)) {
 		state.elevatedProcess = StartElevated(xray, ConfigPath());
 		started = state.elevatedProcess
 			&& SocksReady(state.elevatedProcess, port);
