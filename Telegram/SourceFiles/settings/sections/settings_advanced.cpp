@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "core/file_utilities.h"
 #include "core/launcher.h"
+#include "core/update_channel.h"
 #include "core/update_checker.h"
 #include "core/xray_proxy_manager.h"
 #include "data/data_auto_download.h"
@@ -967,6 +968,7 @@ void BuildSystemIntegrationSection(SectionBuilder &builder) {
 
 	if (Platform::AutostartSupported()) {
 		const auto minimizedToggled = [=] {
+			// Starting hidden must not conceal a verified launch lock.
 			return cStartMinimized()
 				&& controller
 				&& !controller->session().domain().local().hasLocalPasscode();
@@ -1025,6 +1027,7 @@ void BuildSystemIntegrationSection(SectionBuilder &builder) {
 			) | rpl::filter([=](bool checked) {
 				return (checked != minimizedToggled());
 			}) | rpl::on_next([=](bool checked) {
+				// Refuse a verified launch lock, as the checkbox does.
 				if (controller->session().domain().local().hasLocalPasscode()) {
 					minimized->setChecked(false);
 					controller->show(Ui::MakeInformBox(
@@ -1378,7 +1381,9 @@ void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
 	auto install = (Ui::SettingsButton*)nullptr;
 	auto check = (Ui::SettingsButton*)nullptr;
 	builder.scope([&] {
-		install = (cAlphaVersion() || KSandbox::isInside())
+		install = (cAlphaVersion()
+			|| Core::BuildIsCanary
+			|| KSandbox::isInside())
 			? nullptr
 			: builder.addButton({
 				.id = u"advanced/install_beta"_q,
@@ -1732,7 +1737,9 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 			container,
 			object_ptr<Ui::VerticalLayout>(container)));
 	const auto inner = options->entity();
-	const auto install = (cAlphaVersion() || KSandbox::isInside())
+	const auto install = (cAlphaVersion()
+		|| Core::BuildIsCanary
+		|| KSandbox::isInside())
 		? nullptr
 		: inner->add(object_ptr<Button>(
 			inner,
@@ -2157,6 +2164,7 @@ void SetupSystemIntegrationContent(
 
 	if (Platform::AutostartSupported() && controller) {
 		const auto minimizedToggled = [=] {
+			// This path also avoids hiding a verified launch prompt.
 			return cStartMinimized()
 				&& !controller->session().domain().local().hasLocalPasscode();
 		};
@@ -2200,6 +2208,7 @@ void SetupSystemIntegrationContent(
 		) | rpl::filter([=](bool checked) {
 			return (checked != minimizedToggled());
 		}) | rpl::on_next([=](bool checked) {
+			// Keep the verified prompt refusal in this path too.
 			if (controller->session().domain().local().hasLocalPasscode()) {
 				minimized->entity()->setChecked(false);
 				controller->show(Ui::MakeInformBox(
