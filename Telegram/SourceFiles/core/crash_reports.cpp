@@ -438,7 +438,7 @@ Status Restart() {
 	}
 
 #ifdef Q_OS_WIN
-	if (_wfopen_s(&ReportFile, ReportPath.toStdWString().c_str(), L"wb") != 0) {
+	if (_wfopen_s(&ReportFile, ReportPath.toStdWString().c_str(), L"wbN") != 0) {
 		ReportFile = nullptr;
 	}
 #else // Q_OS_WIN
