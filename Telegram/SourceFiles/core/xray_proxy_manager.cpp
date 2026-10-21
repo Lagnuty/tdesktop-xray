@@ -53,6 +53,7 @@ struct State {
 	std::unique_ptr<QProcess> process;
 #ifdef Q_OS_WIN
 	HANDLE elevatedProcess = nullptr;
+	HANDLE processJob = nullptr;
 #endif // Q_OS_WIN
 	uint32 port = 0;
 	QString link;
@@ -162,7 +163,21 @@ struct State {
 	return scheme == u"hysteria2"_q || scheme == u"hy2"_q;
 }
 
-[[nodiscard]] QJsonObject StreamSettings(const QUrl &url) {
+[[nodiscard]] std::optional<QJsonObject> ParseJsonObject(
+		const QUrlQuery &query,
+		const QString &name) {
+	if (!query.hasQueryItem(name)) {
+		return QJsonObject();
+	}
+	const auto value = query.queryItemValue(name, QUrl::FullyDecoded);
+	auto error = QJsonParseError();
+	const auto document = QJsonDocument::fromJson(value.toUtf8(), &error);
+	return (error.error == QJsonParseError::NoError && document.isObject())
+		? std::optional<QJsonObject>(document.object())
+		: std::nullopt;
+}
+
+[[nodiscard]] std::optional<QJsonObject> StreamSettings(const QUrl &url) {
 	const auto query = QUrlQuery(url);
 	auto result = QJsonObject();
 	const auto type = query.queryItemValue(u"type"_q);
@@ -184,13 +199,54 @@ struct State {
 			ws.insert(u"headers"_q, QJsonObject{ { u"Host"_q, host } });
 		}
 		result.insert(u"wsSettings"_q, ws);
+	} else if (type == u"kcp"_q) {
+		auto kcp = QJsonObject();
+		for (const auto &name : { u"mtu"_q, u"tti"_q }) {
+			const auto value = query.queryItemValue(name).toInt();
+			if (value > 0) {
+				kcp.insert(name, value);
+			}
+		}
+		result.insert(u"kcpSettings"_q, kcp);
 	} else if (type == u"grpc"_q) {
 		const auto serviceName = query.queryItemValue(u"serviceName"_q);
+		const auto authority = query.queryItemValue(u"authority"_q);
+		const auto mode = query.queryItemValue(u"mode"_q);
+		auto grpc = QJsonObject();
 		if (!serviceName.isEmpty()) {
-			result.insert(
-				u"grpcSettings"_q,
-				QJsonObject{ { u"serviceName"_q, serviceName } });
+			grpc.insert(u"serviceName"_q, serviceName);
 		}
+		if (!authority.isEmpty()) {
+			grpc.insert(u"authority"_q, authority);
+		}
+		if (mode == u"multi"_q) {
+			grpc.insert(u"multiMode"_q, true);
+		}
+		result.insert(u"grpcSettings"_q, grpc);
+	} else if (type == u"httpupgrade"_q) {
+		auto settings = QJsonObject();
+		for (const auto &name : { u"path"_q, u"host"_q }) {
+			const auto value = query.queryItemValue(name);
+			if (!value.isEmpty()) {
+				settings.insert(name, value);
+			}
+		}
+		result.insert(u"httpupgradeSettings"_q, settings);
+	} else if (type == u"xhttp"_q) {
+		auto settings = QJsonObject();
+		for (const auto &name : { u"path"_q, u"host"_q, u"mode"_q }) {
+			const auto value = query.queryItemValue(name);
+			if (!value.isEmpty()) {
+				settings.insert(name, value);
+			}
+		}
+		const auto extra = ParseJsonObject(query, u"extra"_q);
+		if (!extra) {
+			return std::nullopt;
+		} else if (!extra->isEmpty()) {
+			settings.insert(u"extra"_q, *extra);
+		}
+		result.insert(u"xhttpSettings"_q, settings);
 	}
 	if (security == u"tls"_q || security == u"reality"_q) {
 		auto tls = QJsonObject();
@@ -198,7 +254,13 @@ struct State {
 		const auto fp = query.queryItemValue(u"fp"_q);
 		const auto pbk = query.queryItemValue(u"pbk"_q);
 		const auto sid = query.queryItemValue(u"sid"_q);
+		const auto pqv = query.queryItemValue(u"pqv"_q);
 		const auto spx = query.queryItemValue(u"spx"_q);
+		const auto alpn = query.queryItemValue(u"alpn"_q).split(
+			',',
+			Qt::SkipEmptyParts);
+		const auto pcs = query.queryItemValue(u"pcs"_q);
+		const auto vcn = query.queryItemValue(u"vcn"_q);
 		if (!sni.isEmpty()) {
 			tls.insert(u"serverName"_q, sni);
 		}
@@ -206,19 +268,37 @@ struct State {
 			tls.insert(u"fingerprint"_q, fp);
 		}
 		if (!pbk.isEmpty()) {
-			tls.insert(u"publicKey"_q, pbk);
+			tls.insert(u"password"_q, pbk);
 		}
 		if (!sid.isEmpty()) {
 			tls.insert(u"shortId"_q, sid);
 		}
+		if (!pqv.isEmpty()) {
+			tls.insert(u"mldsa65Verify"_q, pqv);
+		}
 		if (!spx.isEmpty()) {
 			tls.insert(u"spiderX"_q, spx);
+		}
+		if (!alpn.isEmpty()) {
+			tls.insert(u"alpn"_q, QJsonArray::fromStringList(alpn));
+		}
+		if (!pcs.isEmpty()) {
+			tls.insert(u"pinnedPeerCertSha256"_q, pcs);
+		}
+		if (!vcn.isEmpty()) {
+			tls.insert(u"verifyPeerCertByName"_q, vcn);
 		}
 		result.insert(
 			(security == u"reality"_q)
 				? u"realitySettings"_q
 				: u"tlsSettings"_q,
 			tls);
+	}
+	const auto finalmask = ParseJsonObject(query, u"fm"_q);
+	if (!finalmask) {
+		return std::nullopt;
+	} else if (!finalmask->isEmpty()) {
+		result.insert(u"finalmask"_q, *finalmask);
 	}
 	return result;
 }
@@ -279,7 +359,7 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 	};
 }
 
-[[nodiscard]] QJsonObject VlessOutbound(const QUrl &url) {
+[[nodiscard]] std::optional<QJsonObject> VlessOutbound(const QUrl &url) {
 	const auto query = QUrlQuery(url);
 	const auto encryption = query.queryItemValue(u"encryption"_q);
 	auto user = QJsonObject{
@@ -303,13 +383,15 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 		} },
 	};
 	const auto stream = StreamSettings(url);
-	if (!stream.isEmpty()) {
-		result.insert(u"streamSettings"_q, stream);
+	if (!stream) {
+		return std::nullopt;
+	} else if (!stream->isEmpty()) {
+		result.insert(u"streamSettings"_q, *stream);
 	}
 	return result;
 }
 
-[[nodiscard]] QJsonObject TrojanOutbound(const QUrl &url) {
+[[nodiscard]] std::optional<QJsonObject> TrojanOutbound(const QUrl &url) {
 	auto result = QJsonObject{
 		{ u"protocol"_q, u"trojan"_q },
 		{ u"settings"_q, QJsonObject{
@@ -321,13 +403,16 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 		} },
 	};
 	const auto stream = StreamSettings(url);
-	if (!stream.isEmpty()) {
-		result.insert(u"streamSettings"_q, stream);
+	if (!stream) {
+		return std::nullopt;
+	} else if (!stream->isEmpty()) {
+		result.insert(u"streamSettings"_q, *stream);
 	}
 	return result;
 }
 
-[[nodiscard]] QJsonObject Hysteria2Outbound(const QUrl &url) {
+[[nodiscard]] std::optional<QJsonObject> Hysteria2Outbound(
+		const QUrl &url) {
 	const auto query = QUrlQuery(url);
 	auto tls = QJsonObject();
 	const auto sni = query.queryItemValue(u"sni"_q, QUrl::FullyDecoded);
@@ -336,9 +421,10 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 		QUrl::FullyDecoded);
 	const auto alpn = query.queryItemValue(u"alpn"_q, QUrl::FullyDecoded)
 		.split(',', Qt::SkipEmptyParts);
-	const auto insecure = query.queryItemValue(
-		u"insecure"_q,
-		QUrl::FullyDecoded);
+	const auto pcs = query.hasQueryItem(u"pcs"_q)
+		? query.queryItemValue(u"pcs"_q, QUrl::FullyDecoded)
+		: query.queryItemValue(u"pinSHA256"_q, QUrl::FullyDecoded);
+	const auto vcn = query.queryItemValue(u"vcn"_q, QUrl::FullyDecoded);
 	if (!sni.isEmpty()) {
 		tls.insert(u"serverName"_q, sni);
 	}
@@ -348,25 +434,49 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 	if (!alpn.isEmpty()) {
 		tls.insert(u"alpn"_q, QJsonArray::fromStringList(alpn));
 	}
-	if (insecure == u"1"_q || insecure == u"true"_q) {
-		tls.insert(u"allowInsecure"_q, true);
+	if (!pcs.isEmpty()) {
+		tls.insert(u"pinnedPeerCertSha256"_q, pcs);
 	}
-	return {
+	if (!vcn.isEmpty()) {
+		tls.insert(u"verifyPeerCertByName"_q, vcn);
+	}
+	auto stream = QJsonObject{
+		{ u"network"_q, u"hysteria"_q },
+		{ u"security"_q, u"tls"_q },
+		{ u"tlsSettings"_q, tls },
+		{ u"hysteriaSettings"_q, QJsonObject{
+			{ u"version"_q, 2 },
+			{ u"auth"_q, url.userName() },
+		} },
+	};
+	const auto finalmask = ParseJsonObject(query, u"fm"_q);
+	if (!finalmask) {
+		return std::nullopt;
+	}
+	auto mask = *finalmask;
+	const auto obfs = query.queryItemValue(u"obfs"_q);
+	const auto obfsPassword = query.queryItemValue(u"obfs-password"_q);
+	if (obfs == u"salamander"_q && !obfsPassword.isEmpty()) {
+		auto udp = mask.value(u"udp"_q).toArray();
+		udp.append(QJsonObject{
+			{ u"type"_q, u"salamander"_q },
+			{ u"settings"_q, QJsonObject{
+				{ u"password"_q, obfsPassword },
+			} },
+		});
+		mask.insert(u"udp"_q, udp);
+	}
+	if (!mask.isEmpty()) {
+		stream.insert(u"finalmask"_q, mask);
+	}
+	return QJsonObject{
 		{ u"protocol"_q, u"hysteria"_q },
 		{ u"settings"_q, QJsonObject{
 			{ u"version"_q, 2 },
 			{ u"address"_q, url.host() },
 			{ u"port"_q, url.port(443) },
 		} },
-		{ u"streamSettings"_q, QJsonObject{
-			{ u"network"_q, u"hysteria"_q },
-			{ u"security"_q, u"tls"_q },
-			{ u"tlsSettings"_q, tls },
-			{ u"hysteriaSettings"_q, QJsonObject{
-				{ u"version"_q, 2 },
-				{ u"auth"_q, url.userName() },
-			} },
-		} },
+		{ u"streamSettings"_q, stream },
 	};
 }
 
@@ -602,6 +712,36 @@ void ApplyLocalProxy(uint32 port) {
 	return ShellExecuteExW(&info) ? info.hProcess : nullptr;
 }
 
+[[nodiscard]] HANDLE AttachKillOnCloseJob(QProcess &process) {
+	const auto job = CreateJobObjectW(nullptr, nullptr);
+	if (!job) {
+		return nullptr;
+	}
+	auto limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+	limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+	if (!SetInformationJobObject(
+			job,
+			JobObjectExtendedLimitInformation,
+			&limits,
+			sizeof(limits))) {
+		CloseHandle(job);
+		return nullptr;
+	}
+	const auto child = OpenProcess(
+		PROCESS_SET_QUOTA | PROCESS_TERMINATE,
+		FALSE,
+		DWORD(process.processId()));
+	if (!child || !AssignProcessToJobObject(job, child)) {
+		if (child) {
+			CloseHandle(child);
+		}
+		CloseHandle(job);
+		return nullptr;
+	}
+	CloseHandle(child);
+	return job;
+}
+
 [[nodiscard]] bool SocksReady(HANDLE process, uint32 port) {
 	auto timer = QElapsedTimer();
 	timer.start();
@@ -775,7 +915,8 @@ StartResult TestConfig(
 StartResult Start(
 		const QString &link,
 		XrayProxyMode mode,
-		const XrayProxyFragmentSettings &fragment) {
+		const XrayProxyFragmentSettings &fragment,
+		bool validateConfig) {
 	if (!PlatformSupported()) {
 		return { false, tr::lng_xray_proxy_platform_unsupported(tr::now), 0 };
 	}
@@ -796,9 +937,11 @@ StartResult Start(
 		&& IsSameFragment(state.fragment, fragment)) {
 		return { true, QString(), state.port };
 	}
-	const auto test = TestConfig(link, mode, fragment);
-	if (!test.success) {
-		return test;
+	if (validateConfig) {
+		const auto test = TestConfig(link, mode, fragment);
+		if (!test.success) {
+			return test;
+		}
 	}
 	const auto reservation = ReservePort();
 	const auto port = reservation
@@ -812,7 +955,8 @@ StartResult Start(
 		return { false, tr::lng_xray_proxy_config_failed(tr::now), 0 };
 	}
 	const auto &settings = Core::App().settings().proxy();
-	const auto restoreOnFailure = !settings.xrayProxyEnabled();
+	const auto restoreOnFailure = !settings.xrayProxyEnabled()
+		|| !validateConfig;
 	const auto previousProxy = settings.selected();
 	const auto previousSettings = settings.settings();
 	const auto previousCalls = settings.useProxyForCalls();
@@ -836,16 +980,31 @@ StartResult Start(
 		process->setStandardOutputFile(LogPath(), QIODevice::Append);
 		process->setStandardErrorFile(LogPath(), QIODevice::Append);
 		process->start();
-		started = process->waitForStarted(5000)
-			&& SocksReady(*process, port);
+		const auto processStarted = process->waitForStarted(5000);
+#ifdef Q_OS_WIN
+		const auto processJob = processStarted
+			? AttachKillOnCloseJob(*process)
+			: nullptr;
+		started = processJob && SocksReady(*process, port);
+#else // Q_OS_WIN
+		started = processStarted && SocksReady(*process, port);
+#endif // Q_OS_WIN
 		if (!started) {
 			AppendLog(QString::fromUtf8(
 				process->readAllStandardOutput()
 					+ process->readAllStandardError()));
 			process->kill();
 			process->waitForFinished(1000);
+#ifdef Q_OS_WIN
+			if (processJob) {
+				CloseHandle(processJob);
+			}
+#endif // Q_OS_WIN
 		} else {
 			state.process = std::move(process);
+#ifdef Q_OS_WIN
+			state.processJob = processJob;
+#endif // Q_OS_WIN
 		}
 	}
 	if (!started) {
@@ -867,6 +1026,13 @@ StartResult Start(
 	state.mode = mode;
 	state.fragment = fragment;
 	return { true, QString(), port };
+}
+
+StartResult Start(
+		const QString &link,
+		XrayProxyMode mode,
+		const XrayProxyFragmentSettings &fragment) {
+	return Start(link, mode, fragment, true);
 }
 
 StartResult Start(const QString &link) {
@@ -944,6 +1110,9 @@ void Stop() {
 		WaitForSingleObject(state.elevatedProcess, 2000);
 		CloseHandle(state.elevatedProcess);
 	}
+	if (state.processJob) {
+		CloseHandle(state.processJob);
+	}
 #endif // Q_OS_WIN
 	state = State();
 }
@@ -954,7 +1123,8 @@ void SyncFromSettings() {
 		Start(
 			settings.xrayProxyLink(),
 			settings.xrayProxyMode(),
-			settings.xrayProxyFragment());
+			settings.xrayProxyFragment(),
+			false);
 	} else {
 		Stop();
 	}

@@ -956,7 +956,9 @@ void Application::badMtprotoConfigurationError() {
 void Application::startLocalStorage() {
 	Ui::GL::DetectLastCheckCrash();
 	Local::start();
-	XrayProxy::SyncFromSettings();
+	crl::on_main(this, [] {
+		XrayProxy::SyncFromSettings();
+	});
 	_saveSettingsTimer.emplace([=] { saveSettings(); });
 	settings().saveDelayedRequests() | rpl::on_next([=] {
 		saveSettingsDelayed();
