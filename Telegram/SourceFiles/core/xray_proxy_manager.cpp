@@ -960,6 +960,7 @@ StartResult Start(
 	const auto previousProxy = settings.selected();
 	const auto previousSettings = settings.settings();
 	const auto previousCalls = settings.useProxyForCalls();
+	const auto waitUntilReady = validateConfig;
 	ApplyLocalProxy(port);
 	Core::App().settings().proxy().setUseProxyForCalls(true);
 	Stop();
@@ -969,7 +970,7 @@ StartResult Start(
 	if (mode == XrayProxyMode::Vpn && !IsHysteriaLink(link)) {
 		state.elevatedProcess = StartElevated(xray, ConfigPath());
 		started = state.elevatedProcess
-			&& SocksReady(state.elevatedProcess, port);
+			&& (!waitUntilReady || SocksReady(state.elevatedProcess, port));
 	} else
 #endif // Q_OS_WIN
 	{
@@ -985,9 +986,11 @@ StartResult Start(
 		const auto processJob = processStarted
 			? AttachKillOnCloseJob(*process)
 			: nullptr;
-		started = processJob && SocksReady(*process, port);
+		started = processJob
+			&& (!waitUntilReady || SocksReady(*process, port));
 #else // Q_OS_WIN
-		started = processStarted && SocksReady(*process, port);
+		started = processStarted
+			&& (!waitUntilReady || SocksReady(*process, port));
 #endif // Q_OS_WIN
 		if (!started) {
 			AppendLog(QString::fromUtf8(
