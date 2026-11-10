@@ -133,7 +133,7 @@ jobs:
 
       - name: Free up some disk space.
         shell: bash
-        run: find "$LibrariesPath" '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
+        run: find "$LibrariesPath" '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' -o -path '*/src/wallet_engine/*' -o '(' '(' -path '*/tlottie/*' -o -path '*/wallet-engine/*' ')' ! -path '*/target/*' ')' ')' -type f ')' -o '(' -empty ! -path '*/tlottie/*' ! -path '*/wallet-engine/*' ')' ')' -delete
 
       - name: Free runner disk space.
         shell: pwsh
@@ -163,6 +163,10 @@ jobs:
 
       - name: Build Telegram Desktop.
         run: |
+          if not exist "%LibrariesPath%\tdesktop_rust\out\src\wallet_engine\wallet_engine.cpp" (
+            echo Missing generated wallet_engine.cpp after dependency preparation.
+            exit /b 1
+          )
           cd %TBUILD%\%REPO_NAME%\Telegram
           call configure.bat ^
           x64 ^
@@ -173,6 +177,7 @@ jobs:
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF
+          if errorlevel 1 exit /b 1
           cmake --build ..\out --config Debug --parallel 2 --target Telegram
 
       - name: Download Xray.
