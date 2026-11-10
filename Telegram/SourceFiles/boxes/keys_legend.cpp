@@ -8,10 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/keys_legend.h"
 
 #include "base/platform/base_platform_info.h"
-#include "core/application.h"
 #include "core/shortcuts.h"
-#include "editor/editor_layer_widget.h"
-#include "editor/photo_editor.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
 #include "ui/controls/keys_legend.h"
@@ -25,9 +22,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_keys_legend.h"
 #include "styles/style_layers.h"
-
-#include <QtGui/QGuiApplication>
-#include <QtGui/QKeyEvent>
 
 namespace {
 
@@ -164,15 +158,6 @@ using KeysMap = base::flat_map<QKeySequence, base::flat_set<Command>>;
 		return CommandCaps(currents, command);
 	};
 	auto result = std::vector<Section>();
-	result.push_back({
-		.rows = {
-			{
-				{ ShiftKey(), u"?"_q },
-				tr::lng_keys_legend_open(tr::now),
-			},
-		},
-		.stickToPrevious = true,
-	});
 	result.push_back({
 		.title = tr::lng_keys_legend_section_general(tr::now),
 		.rows = {
@@ -702,54 +687,7 @@ void KeysLegendLayer::paintEvent(QPaintEvent *e) {
 		Qt::AlignLeft | Qt::AlignVCenter);
 }
 
-[[nodiscard]] bool InsideMediaEditor(not_null<QWidget*> widget) {
-	for (auto parent = widget.get(); parent; parent = parent->parentWidget()) {
-		if (dynamic_cast<Editor::PhotoEditor*>(parent)
-			|| dynamic_cast<Editor::LayerWidget*>(parent)) {
-			return true;
-		}
-	}
-	return false;
-}
-
 } // namespace
-
-bool HandleKeysLegendHotkey(
-		not_null<Core::Application*> app,
-		not_null<QObject*> object,
-		QKeyEvent *event) {
-	if (event->key() != Qt::Key_Question && event->text() != u"?"_q) {
-		return false;
-	} else if (event->modifiers()
-		& (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) {
-		return false;
-	} else if (app->passcodeLocked()) {
-		return false;
-	}
-	const auto widget = object->isWidgetType()
-		? static_cast<QWidget*>(object.get())
-		: nullptr;
-	if (!widget) {
-		return false;
-	}
-	const auto focus = QGuiApplication::focusObject();
-	if (focus
-		&& (focus->inherits("QLineEdit")
-			|| focus->inherits("QTextEdit")
-			|| focus->inherits("QPlainTextEdit"))) {
-		return false;
-	}
-	const auto window = app->activeWindow();
-	if (!window || widget->window() != window->widget()) {
-		return false;
-	} else if (InsideMediaEditor(widget)) {
-		return false;
-	} else if (event->isAutoRepeat()) {
-		return true;
-	}
-	ShowKeysLegend(window);
-	return true;
-}
 
 void ShowKeysLegend(not_null<Window::Controller*> window) {
 	const auto widget = window->widget();
