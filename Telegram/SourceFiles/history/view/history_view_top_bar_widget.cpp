@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_options.h"
 #include "ui/painter.h"
 #include "ui/unread_badge.h"
+#include "ui/unread_counter_format.h"
 #include "ui/controls/button_context_menu.h"
 #include "ui/ui_utility.h"
 #include "window/window_adaptive.h"
@@ -214,8 +215,9 @@ TopBarWidget::TopBarWidget(
 		| UpdateFlag::Rights
 		| UpdateFlag::EmojiStatus
 		| UpdateFlag::Name
+		| UpdateFlag::BarSettings
 	) | rpl::on_next([=](const Data::PeerUpdate &update) {
-		if ((update.flags & UpdateFlag::Name)
+		if ((update.flags & (UpdateFlag::Name | UpdateFlag::BarSettings))
 			&& (update.peer == titleNamePeer())) {
 			TopBarWidget::update();
 		}
@@ -957,6 +959,13 @@ void TopBarWidget::setActiveChat(
 				update();
 			}, _activeChatLifetime);
 
+			session().changes().topicUpdates(
+				topic,
+				Data::TopicUpdate::Flag::Title
+			) | rpl::on_next([=] {
+				update();
+			}, _activeChatLifetime);
+
 			// _menuToggle visibility depends on "View topic info",
 			// "View topic info" visibility depends on activeChatCurrent.
 			_controller->activeChatChanges(
@@ -1337,10 +1346,13 @@ void TopBarWidget::updateControlsVisibility() {
 
 
 	const auto isOneColumn = _controller->adaptive().isOneColumn();
+
+	// MainWidget is already gone while the window clears its widgets.
+	const auto main = _controller->widget()->sessionContent();
 	const auto backVisible = !rootChatsListBar()
 		&& (isOneColumn
 			|| (_activeChat.section == Section::ChatsList)
-			|| !_controller->content()->stackIsEmpty());
+			|| (main && !main->stackIsEmpty()));
 	_back->setVisible(backVisible && !_chooseForReportReason);
 	_cancelChoose->setVisible(_chooseForReportReason.has_value());
 	updateInfoButtonVisibility();
@@ -1831,14 +1843,9 @@ void TopBarWidget::updateUnreadBadge() {
 	const auto key = _activeChat.key;
 	const auto muted = session().data().unreadBadgeMutedIgnoreOne(key);
 	const auto counter = session().data().unreadBadgeIgnoreOne(key);
-	const auto text = [&] {
-		if (!counter) {
-			return QString();
-		}
-		return (counter > 999)
-			? u"..%1"_q.arg(counter % 100, 2, 10, QChar('0'))
-			: QString::number(counter);
-	}();
+	const auto text = counter
+		? FormatUnreadCounterShort(counter)
+		: QString();
 	_unreadBadge->setText(text, !muted);
 }
 

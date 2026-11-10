@@ -3,10 +3,12 @@ name: MacOS.
 on:
   workflow_dispatch:
   push:
-    # Pushes to the canary branches run only canary.yml, see there.
+    # Pushes to the canary or private-ci branches run their own workflows.
     branches-ignore:
       - public-canary
       - private-canary
+      - 'private-ci/**'
+      - 'private-ci-*'
     paths-ignore:
       - 'docs/**'
       - '**.md'
@@ -136,9 +138,9 @@ jobs:
             XRAY_ASSET="Xray-macos-64.zip"
           fi
           RELEASE_JSON="$(mktemp)"
-          curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest -o "$RELEASE_JSON"
+          curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/tags/v26.11.9 -o "$RELEASE_JSON"
           XRAY_URL="$(
-            python3 -c 'import json, sys; release = json.load(open(sys.argv[1], encoding="utf-8")); url = next((asset["browser_download_url"] for asset in release["assets"] if asset["name"] == sys.argv[2]), None); sys.exit(f"{sys.argv[2]} was not found in the latest Xray release.") if url is None else print(url)' "$RELEASE_JSON" "$XRAY_ASSET"
+            python3 -c 'import json, sys; release = json.load(open(sys.argv[1], encoding="utf-8")); url = next((asset["browser_download_url"] for asset in release["assets"] if asset["name"] == sys.argv[2]), None); sys.exit(f"{sys.argv[2]} was not found in the pinned Xray release.") if url is None else print(url)' "$RELEASE_JSON" "$XRAY_ASSET"
           )"
           curl -fsSL "$XRAY_URL" -o "$RUNNER_TEMP/xray.zip"
           mkdir -p "$RUNNER_TEMP/xray"

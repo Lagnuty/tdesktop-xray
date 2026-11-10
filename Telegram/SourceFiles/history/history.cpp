@@ -71,6 +71,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_shared_media.h"
 #include "storage/storage_account.h"
 #include "support/support_helper.h"
+#include "tgw/tgw_storage.h"
 #include "ui/image/image.h"
 #include "ui/text/text_options.h"
 #include "ui/text/text_utilities.h"
@@ -755,6 +756,7 @@ void History::destroyMessage(not_null<HistoryItem*> item) {
 }
 
 void History::destroyMessagesByDates(TimeId minDate, TimeId maxDate) {
+	Tgw::ClearDatesStorage(this, minDate, maxDate);
 	auto toDestroy = std::vector<not_null<HistoryItem*>>();
 	toDestroy.reserve(_items.size());
 	for (const auto &message : _items) {
@@ -1903,6 +1905,16 @@ void History::addOlderSlice(const QVector<MTPMessage> &slice) {
 		_loadedAtTop = true;
 		checkLocalMessages();
 		return;
+	}
+	if (const auto newest = maxMsgId()) {
+		// WHY: a stale latest-page answer can arrive after older messages
+		// were loaded; prepending it would break the order of blocks.
+		const auto older = [&](const MTPMessage &message) {
+			return IdFromMessage(message) <= newest;
+		};
+		if (ranges::none_of(slice, older)) {
+			return;
+		}
 	}
 
 	if (const auto added = createItems(slice); !added.empty()) {
@@ -4494,6 +4506,7 @@ void History::clear(ClearType type, bool markEmpty) {
 }
 
 void History::clearUpTill(MsgId availableMinId) {
+	Tgw::ClearHistoryStorage(this, availableMinId);
 	auto remove = std::vector<not_null<HistoryItem*>>();
 	remove.reserve(_items.size());
 	for (const auto &item : _items) {
@@ -4501,6 +4514,7 @@ void History::clearUpTill(MsgId availableMinId) {
 		if (!item->isRegular()) {
 			continue;
 		} else if (itemId == availableMinId) {
+			Tgw::DeleteMessageStorage(item.get());
 			owner().scheduleItemPhotoCacheClear(item.get());
 			item->applyEditionToHistoryCleared();
 		} else if (itemId < availableMinId) {
@@ -4622,6 +4636,7 @@ void History::refreshHiddenLinksItems() {
 	for (const auto &id : refresh) {
 		if (const auto item = owner->message(id)) {
 			item->setHasHiddenLinks(false);
+			item->updateDependentServiceText();
 			owner->requestItemViewRefresh(item);
 		}
 	}

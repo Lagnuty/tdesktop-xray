@@ -176,11 +176,13 @@ jobs:
           cmake --build ..\out --config Debug --parallel 2 --target Telegram
 
       - name: Download Xray.
+        env:
+          XRAY_VERSION: v26.11.9
         shell: pwsh
         run: |
-          $release = Invoke-RestMethod https://api.github.com/repos/XTLS/Xray-core/releases/latest
+          $release = Invoke-RestMethod "https://api.github.com/repos/XTLS/Xray-core/releases/tags/$env:XRAY_VERSION"
           $asset = $release.assets | Where-Object { $_.name -eq 'Xray-windows-64.zip' } | Select-Object -First 1
-          if (-not $asset) { throw 'Xray-windows-64.zip was not found in the latest Xray release.' }
+          if (-not $asset) { throw "Xray-windows-64.zip was not found in Xray $env:XRAY_VERSION." }
           $zip = Join-Path $env:RUNNER_TEMP 'xray.zip'
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
           Expand-Archive -LiteralPath $zip -DestinationPath $env:RUNNER_TEMP\xray
