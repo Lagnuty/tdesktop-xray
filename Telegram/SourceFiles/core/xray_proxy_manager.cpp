@@ -446,7 +446,8 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 		{ u"tlsSettings"_q, tls },
 		{ u"hysteriaSettings"_q, QJsonObject{
 			{ u"version"_q, 2 },
-			{ u"auth"_q, url.userName() },
+			{ u"auth"_q, QUrl::fromPercentEncoding(
+				url.userInfo(QUrl::FullyEncoded).toUtf8()) },
 		} },
 	};
 	const auto finalmask = ParseJsonObject(query, u"fm"_q);
@@ -454,9 +455,14 @@ void ApplyFragmentDialer(QJsonObject &outbound) {
 		return std::nullopt;
 	}
 	auto mask = *finalmask;
-	const auto obfs = query.queryItemValue(u"obfs"_q);
-	const auto obfsPassword = query.queryItemValue(u"obfs-password"_q);
-	if (obfs == u"salamander"_q && !obfsPassword.isEmpty()) {
+	const auto obfs = query.queryItemValue(u"obfs"_q, QUrl::FullyDecoded);
+	if (obfs == u"salamander"_q) {
+		const auto obfsPassword = query.queryItemValue(
+			u"obfs-password"_q,
+			QUrl::FullyDecoded);
+		if (obfsPassword.isEmpty()) {
+			return std::nullopt;
+		}
 		auto udp = mask.value(u"udp"_q).toArray();
 		udp.append(QJsonObject{
 			{ u"type"_q, u"salamander"_q },
